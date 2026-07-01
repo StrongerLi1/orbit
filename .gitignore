@@ -1,0 +1,13 @@
+data/db.json
+data/*.backup-*
+data/*.tmp
+.DS_Store
+node_modules/
+.venv-fastapi/
+.venv/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.pytest_cache/

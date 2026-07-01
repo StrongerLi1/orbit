@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f7f6f2">
+  <title>Orbit · 个人工作台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=20260628-pansou">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#dashboard"><span class="logo">O</span><span>Orbit</span></a>
+      <nav>
+        <a class="nav-link active" href="#dashboard" data-page="dashboard"><span>⌂</span>概览</a>
+        <a class="nav-link" href="#bookmarks" data-page="bookmarks"><span>◇</span>收藏夹</a>
+        <a class="nav-link" href="#netdisk" data-page="netdisk"><span>⌕</span>网盘搜索</a>
+        <a class="nav-link" href="#excerpts" data-page="excerpts"><span>“</span>摘录</a>
+        <a class="nav-link" href="#plans" data-page="plans"><span>◷</span>日常计划</a>
+        <a class="nav-link" href="#todos" data-page="todos"><span>✓</span>待办事项</a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="quote">“把生活过成<br>自己喜欢的样子。”</div>
+        <div class="profile"><div class="avatar">K</div><div><strong>我的空间</strong><small>本地私人数据</small></div></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button class="mobile-menu" aria-label="打开菜单">☰</button>
+        <div class="search-wrap"><span>⌕</span><input id="global-search" placeholder="搜索收藏和待办…"><kbd>⌘ K</kbd></div>
+        <div class="date-chip" id="today-chip"></div>
+      </header>
+
+      <div class="content">
+        <section class="page active" id="dashboard">
+          <div class="hero">
+            <div class="hero-copy"><p class="eyebrow">YOUR PERSONAL SPACE</p><h1 id="greeting">晚上好，欢迎回来</h1><p>慢一点也没关系，今天只专注于真正重要的事。</p><div id="featured-excerpt" class="featured-excerpt"></div></div>
+            <button class="primary" data-action="quick-add">＋ 快速添加</button>
+          </div>
+          <div class="stats" id="stats"></div>
+          <div class="dashboard-grid">
+            <section class="card span-2">
+              <div class="card-head"><div><span class="label">TODAY</span><h2>今日计划</h2></div><button class="text-btn" data-page-link="plans">查看全部 →</button></div>
+              <div id="dashboard-plans" class="plan-list"></div>
+            </section>
+            <section class="card focus-card">
+              <div class="orbital"><div class="planet">✦</div><i></i><i></i></div>
+              <span class="label">DAILY FOCUS</span><h2>留一点时间<br>给真正重要的事</h2><p>每天进步一点点，也是在向前。</p>
+            </section>
+            <section class="card span-2">
+              <div class="card-head"><div><span class="label">TO-DO</span><h2>待办事项</h2></div><button class="icon-btn" data-add="todos">＋</button></div>
+              <div id="dashboard-todos" class="todo-list"></div>
+            </section>
+            <section class="card">
+              <div class="card-head"><div><span class="label">BOOKMARKS</span><h2>最近收藏</h2></div><button class="text-btn" data-page-link="bookmarks">更多 →</button></div>
+              <div id="dashboard-bookmarks" class="mini-bookmarks"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" id="excerpts">
+          <div class="page-title"><div><p class="eyebrow">WORDS TO KEEP</p><h1>摘录</h1><p>收藏书中的句子、喜欢的歌词，以及偶然遇见的话。</p></div><button class="primary" data-add="excerpts">＋ 添加摘录</button></div>
+          <div class="excerpt-summary"><span id="excerpt-count">0 条摘录</span><button class="text-btn" id="shuffle-excerpt">↻ 换一句</button></div>
+          <div id="excerpts-grid" class="excerpts-grid"></div>
+        </section>
+
+        <section class="page" id="bookmarks">
+          <div class="page-title"><div><p class="eyebrow">YOUR COLLECTION</p><h1>收藏夹</h1><p>把散落在网络里的好东西放在这里。</p></div><button class="primary" data-add="bookmarks">＋ 添加网站</button></div>
+          <div class="filters"><button class="filter active" data-category="全部">全部</button><div id="category-filters"></div><button class="new-folder" data-add="folders">＋ 新建收藏夹</button></div>
+          <div id="bookmarks-grid" class="bookmarks-grid"></div>
+        </section>
+
+        <section class="page" id="netdisk">
+          <div class="page-title"><div><p class="eyebrow">PANSOU</p><h1>网盘搜索</h1><p>接入 PanSou，快速查找公开分享的网盘资源。</p></div></div>
+          <form class="netdisk-search" id="netdisk-form">
+            <span>⌕</span>
+            <input id="netdisk-keyword" name="kw" autocomplete="off" placeholder="输入关键词，例如：课程、电子书、电影…" required maxlength="80">
+            <button class="primary" type="submit">搜索</button>
+          </form>
+          <div class="netdisk-hint">搜索结果来自 PanSou 服务，请自行判断资源合法性与安全性。</div>
+          <div id="netdisk-status" class="netdisk-status"></div>
+          <div id="netdisk-filters" class="netdisk-filters"></div>
+          <div id="netdisk-results" class="netdisk-results"></div>
+        </section>
+
+        <section class="page" id="plans">
+          <div class="page-title"><div><p class="eyebrow">DAILY RHYTHM</p><h1>日常计划</h1><p>不是填满时间，而是找到自己的节奏。</p></div><button class="primary" data-add="plans">＋ 添加计划</button></div>
+          <div class="plan-datebar"><button data-shift-date="-1" aria-label="前一天">‹</button><input id="plan-date" type="date" aria-label="计划日期"><button class="today-btn" data-plan-today>今天</button><button data-shift-date="1" aria-label="后一天">›</button></div>
+          <div id="plan-metrics" class="plan-metrics"></div>
+          <div class="plan-layout">
+            <div class="card timeline-card"><div class="card-head"><div><span class="label">SCHEDULE</span><h2 id="selected-date-title">当日计划</h2></div></div><div id="plans-list" class="timeline"></div></div>
+            <div class="card completion-card"><div class="card-head"><div><span class="label">LAST 7 DAYS</span><h2>每日执行次数</h2></div><span id="chart-average" class="count"></span></div><div id="completion-chart" class="completion-chart"></div><div class="chart-legend"><span><i></i>打卡次数</span><span>柱高表示当天执行量</span></div></div>
+          </div>
+          <div class="card performance-card"><div class="card-head"><div><span class="label">BY PLAN</span><h2>按计划统计</h2></div><span class="duration">统计至当前选择日期</span></div><div id="plan-performance" class="plan-performance"></div></div>
+        </section>
+
+        <section class="page" id="todos">
+          <div class="page-title"><div><p class="eyebrow">GET THINGS DONE</p><h1>待办事项</h1><p>一次做好一件事，其他的先交给这里。</p></div><button class="primary" data-add="todos">＋ 添加待办</button></div>
+          <div class="todo-board"><div class="card"><div class="card-head"><h2>进行中</h2><span id="active-count" class="count"></span></div><div id="todos-active" class="todo-list large"></div></div><div class="card"><div class="card-head"><h2>已完成</h2><button class="text-btn" id="clear-completed">清空</button></div><div id="todos-completed" class="todo-list large"></div></div></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><span class="label" id="modal-label">NEW ITEM</span><h2 id="modal-title">添加</h2></div><button class="close" aria-label="关闭">×</button></div><form id="item-form"><div id="form-fields"></div><div class="form-actions"><button type="button" class="secondary close">取消</button><button type="submit" class="primary">保存</button></div></form></div>
+  </div>
+  <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
+  <div id="toast" class="toast"></div>
+  <script src="/app.js?v=20260628-pansou"></script>
+</body>
+</html>
