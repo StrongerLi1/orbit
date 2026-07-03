@@ -22,6 +22,13 @@ class Settings:
     pansou_base_url = pansou_base_url.rstrip("/")
     pansou_timeout = float(os.getenv("PANSOU_TIMEOUT") or os.getenv("LIMITLESS_SEARCH_TIMEOUT", "12"))
     session_secret = os.getenv("SESSION_SECRET", "dev-session-secret-change-me")
+    jwt_secret = os.getenv("JWT_SECRET") or session_secret
+    jwt_access_minutes = int(os.getenv("JWT_ACCESS_MINUTES", "15"))
+    jwt_refresh_days = int(os.getenv("JWT_REFRESH_DAYS", "14"))
+    redis_host = os.getenv("REDIS_HOST", "127.0.0.1")
+    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+    redis_db = int(os.getenv("REDIS_DB", "0"))
+    redis_password = os.getenv("REDIS_PASSWORD", "")
     admin_username = os.getenv("ADMIN_USERNAME", "")
     admin_password = os.getenv("ADMIN_PASSWORD", "")
 

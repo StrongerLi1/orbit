@@ -30,6 +30,9 @@ export MYSQL_PASSWORD=orbit_password
 export MYSQL_DATABASE=orbit
 export PANSOU_BASE_URL=http://127.0.0.1:8888
 export SESSION_SECRET=change-me-to-a-long-random-string
+export JWT_SECRET=change-me-to-a-long-random-string
+export REDIS_HOST=127.0.0.1
+export REDIS_PORT=6379
 export ADMIN_USERNAME=admin
 export ADMIN_PASSWORD=change-me-admin-password
 ```
@@ -45,6 +48,8 @@ npm start
 ## 数据
 
 首次启动会自动创建 MySQL 表；如果 MySQL 为空且存在 `data/db.json`，会自动从旧 JSON 文件迁移一次。迁移完成后，新增、完成和删除操作都会写入 MySQL。
+
+登录态使用双 JWT：短期 access token 放 HttpOnly Cookie，长期 refresh token 放 HttpOnly Cookie，并在 Redis 中保存 refresh token 的 jti，用于续期和退出登录时失效。
 
 如果配置了 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`，启动时会自动创建或修正管理员账户。
 
@@ -62,7 +67,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/folders`，`PATCH/DELETE /api/folders/:id`
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
-- `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/logout`，`GET /api/auth/me`
+- `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/refresh`，`POST /api/auth/logout`，`GET /api/auth/me`
 
 ## 网盘搜索
 

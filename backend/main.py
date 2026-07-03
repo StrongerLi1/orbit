@@ -11,12 +11,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .auth import (
-    clear_session_cookie,
+    clear_auth_cookies,
     create_user,
     get_user_by_username,
     public_user,
+    refresh_user,
     require_user,
-    set_session_cookie,
+    revoke_refresh_token,
+    set_auth_cookies,
     touch_login,
     validate_credentials_input,
     verify_password,
@@ -202,7 +204,7 @@ def auth_me(request: Request):
 async def auth_register(request: Request, response: Response):
     data = await request.json()
     user = create_user(data.get("username", ""), data.get("password", ""))
-    set_session_cookie(response, user)
+    set_auth_cookies(response, user)
     return public_user(user)
 
 
@@ -215,13 +217,19 @@ async def auth_login(request: Request, response: Response):
         raise HTTPException(status_code=401, detail="用户名或密码不正确")
     touch_login(user["id"])
     user["last_login_at"] = user.get("last_login_at") or ""
-    set_session_cookie(response, user)
+    set_auth_cookies(response, user)
     return public_user(user)
 
 
+@app.post("/api/auth/refresh")
+def auth_refresh(request: Request, response: Response):
+    return public_user(refresh_user(request, response))
+
+
 @app.post("/api/auth/logout")
-def auth_logout(response: Response):
-    clear_session_cookie(response)
+def auth_logout(request: Request, response: Response):
+    revoke_refresh_token(request.cookies.get("orbit_refresh", ""))
+    clear_auth_cookies(response)
     return {"ok": True}
 
 

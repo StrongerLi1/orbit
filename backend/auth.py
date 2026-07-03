@@ -8,14 +8,16 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import redis
 from fastapi import HTTPException, Request, Response
 
 from .config import settings
 from .database import connection, now_iso
 
 
-COOKIE_NAME = "orbit_session"
-SESSION_DAYS = 14
+ACCESS_COOKIE = "orbit_access"
+REFRESH_COOKIE = "orbit_refresh"
+OLD_SESSION_COOKIE = "orbit_session"
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
 
 
@@ -92,6 +94,17 @@ def touch_login(user_id: str) -> None:
             cursor.execute("UPDATE users SET last_login_at = %s WHERE id = %s", (now_iso(), user_id))
 
 
+def _redis() -> redis.Redis:
+    return redis.Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        db=settings.redis_db,
+        password=settings.redis_password or None,
+        decode_responses=True,
+        socket_timeout=3,
+    )
+
+
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
@@ -100,38 +113,48 @@ def _unb64(value: str) -> bytes:
     return base64.urlsafe_b64decode((value + "=" * (-len(value) % 4)).encode())
 
 
-def sign_session(user: dict[str, Any]) -> str:
-    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
-    payload = {
-        "id": user["id"],
-        "username": user["username"],
-        "isAdmin": bool(user["is_admin"]),
-        "exp": int(expires_at.timestamp()),
+def _jwt_encode(payload: dict[str, Any], ttl_seconds: int) -> str:
+    now = int(datetime.now(timezone.utc).timestamp())
+    body = {
+        **payload,
+        "iat": now,
+        "exp": int((datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)).timestamp()),
     }
-    body = _b64(json.dumps(payload, separators=(",", ":")).encode())
-    signature = hmac.new(settings.session_secret.encode(), body.encode(), hashlib.sha256).digest()
-    return f"{body}.{_b64(signature)}"
+    header = {"alg": "HS256", "typ": "JWT"}
+    signing_input = ".".join([
+        _b64(json.dumps(header, separators=(",", ":")).encode()),
+        _b64(json.dumps(body, separators=(",", ":")).encode()),
+    ])
+    signature = hmac.new(settings.jwt_secret.encode(), signing_input.encode(), hashlib.sha256).digest()
+    return f"{signing_input}.{_b64(signature)}"
 
 
-def read_session(token: str) -> dict[str, Any] | None:
+def _jwt_decode(token: str, token_type: str) -> dict[str, Any]:
     try:
-        body, signature = token.split(".", 1)
-        expected = _b64(hmac.new(settings.session_secret.encode(), body.encode(), hashlib.sha256).digest())
+        header_raw, payload_raw, signature = token.split(".", 2)
+        signing_input = f"{header_raw}.{payload_raw}"
+        expected = _b64(hmac.new(settings.jwt_secret.encode(), signing_input.encode(), hashlib.sha256).digest())
         if not hmac.compare_digest(signature, expected):
-            return None
-        payload = json.loads(_unb64(body))
+            raise ValueError("bad signature")
+        payload = json.loads(_unb64(payload_raw))
+        if payload.get("typ") != token_type:
+            raise ValueError("bad token type")
         if int(payload.get("exp", 0)) < int(datetime.now(timezone.utc).timestamp()):
-            return None
+            raise ValueError("expired")
         return payload
-    except Exception:
-        return None
+    except Exception as error:
+        raise HTTPException(status_code=401, detail="请先登录") from error
 
 
-def set_session_cookie(response: Response, user: dict[str, Any]) -> None:
+def _refresh_key(jti: str) -> str:
+    return f"orbit:refresh:{jti}"
+
+
+def _set_cookie(response: Response, name: str, value: str, max_age: int) -> None:
     response.set_cookie(
-        COOKIE_NAME,
-        sign_session(user),
-        max_age=SESSION_DAYS * 24 * 60 * 60,
+        name,
+        value,
+        max_age=max_age,
         httponly=True,
         samesite="lax",
         secure=False,
@@ -139,18 +162,59 @@ def set_session_cookie(response: Response, user: dict[str, Any]) -> None:
     )
 
 
-def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE_NAME, path="/")
+def set_auth_cookies(response: Response, user: dict[str, Any]) -> None:
+    access_seconds = settings.jwt_access_minutes * 60
+    refresh_seconds = settings.jwt_refresh_days * 24 * 60 * 60
+    refresh_jti = str(uuid.uuid4())
+    base_payload = {
+        "sub": user["id"],
+        "username": user["username"],
+        "isAdmin": bool(user["is_admin"]),
+    }
+    access_token = _jwt_encode({**base_payload, "typ": "access"}, access_seconds)
+    refresh_token = _jwt_encode({**base_payload, "typ": "refresh", "jti": refresh_jti}, refresh_seconds)
+    _redis().setex(_refresh_key(refresh_jti), refresh_seconds, user["id"])
+    _set_cookie(response, ACCESS_COOKIE, access_token, access_seconds)
+    _set_cookie(response, REFRESH_COOKIE, refresh_token, refresh_seconds)
+    response.delete_cookie(OLD_SESSION_COOKIE, path="/")
+
+
+def clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(ACCESS_COOKIE, path="/")
+    response.delete_cookie(REFRESH_COOKIE, path="/")
+    response.delete_cookie(OLD_SESSION_COOKIE, path="/")
+
+
+def revoke_refresh_token(token: str) -> None:
+    if not token:
+        return
+    try:
+        payload = _jwt_decode(token, "refresh")
+        _redis().delete(_refresh_key(str(payload.get("jti", ""))))
+    except HTTPException:
+        return
 
 
 def require_user(request: Request) -> dict[str, Any]:
-    token = request.cookies.get(COOKIE_NAME, "")
-    session = read_session(token)
-    if not session:
-        raise HTTPException(status_code=401, detail="请先登录")
-    user = get_user_by_id(str(session.get("id", "")))
+    payload = _jwt_decode(request.cookies.get(ACCESS_COOKIE, ""), "access")
+    user = get_user_by_id(str(payload.get("sub", "")))
     if not user:
         raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    return user
+
+
+def refresh_user(request: Request, response: Response) -> dict[str, Any]:
+    token = request.cookies.get(REFRESH_COOKIE, "")
+    payload = _jwt_decode(token, "refresh")
+    jti = str(payload.get("jti", ""))
+    user_id = str(payload.get("sub", ""))
+    if _redis().get(_refresh_key(jti)) != user_id:
+        raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    _redis().delete(_refresh_key(jti))
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    set_auth_cookies(response, user)
     return user
 
 

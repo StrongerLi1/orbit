@@ -35,12 +35,23 @@ function planHistory(plan, until) {
   });
 }
 
-async function request(url, options = {}) {
+async function request(url, options = {}, retry = true) {
   const response = await fetch(url, { headers: { 'content-type': 'application/json' }, ...options });
   const result = await response.json().catch(() => ({}));
+  if (response.status === 401 && retry && !url.startsWith('/api/auth/login') && !url.startsWith('/api/auth/register') && !url.startsWith('/api/auth/refresh') && !url.startsWith('/api/auth/logout')) {
+    const refreshed = await refreshAuth();
+    if (refreshed) return request(url, options, false);
+  }
   if (response.status === 401) showAuth('login');
   if (!response.ok) throw new Error(result.error || '操作失败');
   return result;
+}
+
+async function refreshAuth() {
+  const response = await fetch('/api/auth/refresh', { method:'POST', headers: { 'content-type': 'application/json' } });
+  if (!response.ok) return false;
+  state.user = await response.json();
+  return true;
 }
 
 function resetToLoginRoute() {
@@ -304,6 +315,7 @@ function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id=
 
 async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;
+  if (!location.hash) { showAuth('login'); return; }
   try {
     state.user = await request('/api/auth/me');
     showApp();
