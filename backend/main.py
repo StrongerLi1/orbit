@@ -6,10 +6,21 @@ import urllib.request
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .auth import (
+    clear_session_cookie,
+    create_user,
+    get_user_by_username,
+    public_user,
+    require_user,
+    set_session_cookie,
+    touch_login,
+    validate_credentials_input,
+    verify_password,
+)
 from .config import PUBLIC_DIR, settings
 from .database import COLLECTIONS, initialize_database
 from .repository import (
@@ -182,8 +193,41 @@ def _normalize_search_results(payload: Any) -> list[dict[str, Any]]:
     return results
 
 
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    return public_user(require_user(request))
+
+
+@app.post("/api/auth/register", status_code=201)
+async def auth_register(request: Request, response: Response):
+    data = await request.json()
+    user = create_user(data.get("username", ""), data.get("password", ""))
+    set_session_cookie(response, user)
+    return public_user(user)
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request, response: Response):
+    data = await request.json()
+    username, password = validate_credentials_input(data.get("username", ""), data.get("password", ""))
+    user = get_user_by_username(username)
+    if not user or not verify_password(password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="用户名或密码不正确")
+    touch_login(user["id"])
+    user["last_login_at"] = user.get("last_login_at") or ""
+    set_session_cookie(response, user)
+    return public_user(user)
+
+
+@app.post("/api/auth/logout")
+def auth_logout(response: Response):
+    clear_session_cookie(response)
+    return {"ok": True}
+
+
 @app.get("/api/netdisk/search")
-def netdisk_search(kw: str = "", page: int = 1):
+def netdisk_search(request: Request, kw: str = "", page: int = 1):
+    require_user(request)
     keyword = kw.strip()
     if not keyword:
         raise HTTPException(status_code=422, detail="请输入搜索关键词")
@@ -192,12 +236,12 @@ def netdisk_search(kw: str = "", page: int = 1):
 
     query = urllib.parse.urlencode({"kw": keyword, "page": max(1, int(page or 1))})
     target = f"{settings.pansou_base_url}/api/search?{query}"
-    request = urllib.request.Request(target, headers={
+    search_request = urllib.request.Request(target, headers={
         "accept": "application/json",
         "user-agent": "OrbitPersonalHub/1.0",
     })
     try:
-        with urllib.request.urlopen(request, timeout=settings.pansou_timeout) as response:
+        with urllib.request.urlopen(search_request, timeout=settings.pansou_timeout) as response:
             content_type = response.headers.get("content-type", "")
             raw = response.read(2_000_000)
     except urllib.error.HTTPError as error:
@@ -226,7 +270,8 @@ def netdisk_search(kw: str = "", page: int = 1):
 
 
 @app.get("/api/{collection}")
-def api_list(collection: str):
+def api_list(collection: str, request: Request):
+    require_user(request)
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     return list_items(collection)
@@ -234,6 +279,7 @@ def api_list(collection: str):
 
 @app.post("/api/{collection}", status_code=201)
 async def api_create(collection: str, request: Request):
+    require_user(request)
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     valid = validate(collection, await request.json())
@@ -244,6 +290,7 @@ async def api_create(collection: str, request: Request):
 
 @app.patch("/api/{collection}/{item_id}")
 async def api_update(collection: str, item_id: str, request: Request):
+    require_user(request)
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     existing = get_item(collection, item_id)
@@ -254,7 +301,8 @@ async def api_update(collection: str, item_id: str, request: Request):
 
 
 @app.delete("/api/{collection}/{item_id}")
-def api_delete(collection: str, item_id: str):
+def api_delete(collection: str, item_id: str, request: Request):
+    require_user(request)
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     existing = get_item(collection, item_id)

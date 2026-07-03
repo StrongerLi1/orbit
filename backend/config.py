@@ -21,6 +21,9 @@ class Settings:
     pansou_base_url = os.getenv("PANSOU_BASE_URL") or os.getenv("LIMITLESS_SEARCH_BASE_URL", "http://127.0.0.1:8888")
     pansou_base_url = pansou_base_url.rstrip("/")
     pansou_timeout = float(os.getenv("PANSOU_TIMEOUT") or os.getenv("LIMITLESS_SEARCH_TIMEOUT", "12"))
+    session_secret = os.getenv("SESSION_SECRET", "dev-session-secret-change-me")
+    admin_username = os.getenv("ADMIN_USERNAME", "")
+    admin_password = os.getenv("ADMIN_PASSWORD", "")
 
 
 settings = Settings()

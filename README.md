@@ -29,6 +29,9 @@ export MYSQL_USER=orbit
 export MYSQL_PASSWORD=orbit_password
 export MYSQL_DATABASE=orbit
 export PANSOU_BASE_URL=http://127.0.0.1:8888
+export SESSION_SECRET=change-me-to-a-long-random-string
+export ADMIN_USERNAME=admin
+export ADMIN_PASSWORD=change-me-admin-password
 ```
 
 4. 启动：
@@ -42,6 +45,8 @@ npm start
 ## 数据
 
 首次启动会自动创建 MySQL 表；如果 MySQL 为空且存在 `data/db.json`，会自动从旧 JSON 文件迁移一次。迁移完成后，新增、完成和删除操作都会写入 MySQL。
+
+如果配置了 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`，启动时会自动创建或修正管理员账户。
 
 可以直接导入 Chrome、Edge 等浏览器导出的 Netscape 书签 HTML，脚本会清理标题、自动分类并按 URL 去重：
 
@@ -57,6 +62,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/folders`，`PATCH/DELETE /api/folders/:id`
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
+- `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/logout`，`GET /api/auth/me`
 
 ## 网盘搜索
 

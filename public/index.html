@@ -8,10 +8,32 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260628-pansou">
+  <link rel="stylesheet" href="/styles.css?v=20260703-auth">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="auth-screen" id="auth-screen">
+    <section class="auth-card">
+      <div>
+        <span class="logo">O</span>
+        <p class="eyebrow">PRIVATE ORBIT</p>
+        <h1 id="auth-title">登录你的空间</h1>
+        <p class="auth-copy">收藏、计划、待办和摘录都在这里，先确认一下是你本人。</p>
+      </div>
+      <form id="login-form" class="auth-form">
+        <div class="field"><label>用户名</label><input name="username" autocomplete="username" required minlength="3" maxlength="32" placeholder="admin"></div>
+        <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="至少 8 位"></div>
+        <button class="primary" type="submit">登录</button>
+      </form>
+      <form id="register-form" class="auth-form" hidden>
+        <div class="field"><label>用户名</label><input name="username" autocomplete="username" required minlength="3" maxlength="32" placeholder="字母、数字、下划线"></div>
+        <div class="field"><label>密码</label><input name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="至少 8 位"></div>
+        <button class="primary" type="submit">注册并进入</button>
+      </form>
+      <button class="text-btn auth-switch" id="auth-switch" type="button">还没有账号？注册一个</button>
+    </section>
+  </div>
+
+  <div class="app-shell" hidden>
     <aside class="sidebar">
       <a class="brand" href="#dashboard"><span class="logo">O</span><span>Orbit</span></a>
       <nav>
@@ -32,7 +54,11 @@
       <header class="topbar">
         <button class="mobile-menu" aria-label="打开菜单">☰</button>
         <div class="search-wrap"><span>⌕</span><input id="global-search" placeholder="搜索收藏和待办…"><kbd>⌘ K</kbd></div>
-        <div class="date-chip" id="today-chip"></div>
+        <div class="top-actions">
+          <div class="date-chip" id="today-chip"></div>
+          <div class="user-chip" id="user-chip"></div>
+          <button class="text-btn logout-btn" id="logout-btn">退出</button>
+        </div>
       </header>
 
       <div class="content">
@@ -111,6 +137,6 @@
   </div>
   <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
   <div id="toast" class="toast"></div>
-  <script src="/app.js?v=20260628-pansou"></script>
+  <script src="/app.js?v=20260703-auth"></script>
 </body>
 </html>

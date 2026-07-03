@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' } };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -37,9 +37,36 @@ function planHistory(plan, until) {
 
 async function request(url, options = {}) {
   const response = await fetch(url, { headers: { 'content-type': 'application/json' }, ...options });
-  const result = await response.json();
+  const result = await response.json().catch(() => ({}));
+  if (response.status === 401 && state.user) showAuth('login');
   if (!response.ok) throw new Error(result.error || '操作失败');
   return result;
+}
+
+function showAuth(mode = 'login') {
+  state.authMode = mode;
+  state.user = null;
+  $('#auth-screen').hidden = false;
+  $('.app-shell').hidden = true;
+  $('#login-form').hidden = mode !== 'login';
+  $('#register-form').hidden = mode !== 'register';
+  $('#auth-title').textContent = mode === 'login' ? '登录你的空间' : '注册新账号';
+  $('#auth-switch').textContent = mode === 'login' ? '还没有账号？注册一个' : '已有账号？返回登录';
+  setTimeout(() => $(`#${mode}-form input`)?.focus(), 50);
+}
+
+function showApp() {
+  $('#auth-screen').hidden = true;
+  $('.app-shell').hidden = false;
+  $('#user-chip').textContent = state.user ? `${state.user.username}${state.user.isAdmin ? ' · 管理员' : ''}` : '';
+}
+
+async function authSubmit(path, form) {
+  const payload = Object.fromEntries(new FormData(form));
+  state.user = await request(path, { method:'POST', body:JSON.stringify(payload) });
+  showApp();
+  showPage(location.hash.slice(1) || 'dashboard');
+  await load();
 }
 
 async function load() {
@@ -246,6 +273,10 @@ document.addEventListener('change', async (event) => {
 $('#clear-completed').addEventListener('click', async () => { await Promise.all(state.todos.filter((t)=>t.completed).map((t)=>request(`/api/todos/${t.id}`,{method:'DELETE'}))); await load(); toast('已清空'); });
 $('#global-search').addEventListener('input', (e) => { state.search=e.target.value.trim().toLowerCase(); if(state.search){showPage('bookmarks');location.hash='bookmarks'} render(); });
 $('#plan-date').addEventListener('change', (event) => { if (event.target.value) { state.planDate = event.target.value; render(); } });
+$('#auth-switch').addEventListener('click', () => showAuth(state.authMode === 'login' ? 'register' : 'login'));
+$('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/login', event.currentTarget); toast('欢迎回来'); } catch (e) { toast(e.message); } });
+$('#register-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/register', event.currentTarget); toast('注册成功'); } catch (e) { toast(e.message); } });
+$('#logout-btn').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST' }).catch(() => null); showAuth('login'); toast('已退出'); });
 $('#netdisk-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const keyword = $('#netdisk-keyword').value.trim();
@@ -265,5 +296,15 @@ window.addEventListener('hashchange',()=>showPage(location.hash.slice(1)||'dashb
 async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
 function showPage(id){if(!$('#'+id))id='dashboard';$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');}
 
-const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;
-showPage(location.hash.slice(1)||'dashboard'); load().catch((e)=>toast(e.message));
+async function boot() {
+  const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;
+  try {
+    state.user = await request('/api/auth/me');
+    showApp();
+    showPage(location.hash.slice(1)||'dashboard');
+    await load();
+  } catch {
+    showAuth('login');
+  }
+}
+boot();

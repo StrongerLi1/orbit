@@ -145,9 +145,23 @@ def initialize_database() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id VARCHAR(64) PRIMARY KEY,
+                    username VARCHAR(64) NOT NULL UNIQUE,
+                    password_hash VARCHAR(255) NOT NULL,
+                    is_admin TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at VARCHAR(40) NOT NULL,
+                    last_login_at VARCHAR(40) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
 
     if settings.migrate_from_json:
         migrate_from_json_if_empty(DATA_FILE)
+    from .auth import seed_admin_user
+    seed_admin_user()
 
 
 def migrate_from_json_if_empty(source: Path) -> None:
