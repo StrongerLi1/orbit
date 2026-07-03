@@ -38,14 +38,19 @@ function planHistory(plan, until) {
 async function request(url, options = {}) {
   const response = await fetch(url, { headers: { 'content-type': 'application/json' }, ...options });
   const result = await response.json().catch(() => ({}));
-  if (response.status === 401 && state.user) showAuth('login');
+  if (response.status === 401) showAuth('login');
   if (!response.ok) throw new Error(result.error || '操作失败');
   return result;
+}
+
+function resetToLoginRoute() {
+  if (location.pathname !== '/' || location.hash) history.replaceState(null, '', '/');
 }
 
 function showAuth(mode = 'login') {
   state.authMode = mode;
   state.user = null;
+  resetToLoginRoute();
   $('#auth-screen').hidden = false;
   $('.app-shell').hidden = true;
   $('#login-form').hidden = mode !== 'login';
@@ -65,7 +70,8 @@ async function authSubmit(path, form) {
   const payload = Object.fromEntries(new FormData(form));
   state.user = await request(path, { method:'POST', body:JSON.stringify(payload) });
   showApp();
-  showPage(location.hash.slice(1) || 'dashboard');
+  location.hash = 'dashboard';
+  showPage('dashboard');
   await load();
 }
 
@@ -292,9 +298,9 @@ $('#netdisk-form').addEventListener('submit', async (event) => {
   renderNetdisk();
 });
 document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape')closeModal(); });
-window.addEventListener('hashchange',()=>showPage(location.hash.slice(1)||'dashboard'));
+window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));
 async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
-function showPage(id){if(!$('#'+id))id='dashboard';$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');}
+function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');}
 
 async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;
