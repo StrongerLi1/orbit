@@ -63,7 +63,10 @@ def validate(collection: str, input_data: dict[str, Any]) -> dict[str, Any]:
         name = str(item.get("name") or "").strip()[:30]
         if not name:
             raise HTTPException(status_code=422, detail="收藏夹名称不能为空")
-        return {"name": name}
+        result = {"name": name}
+        if "sortOrder" in item:
+            result["sortOrder"] = max(0, min(100_000, round(_number(item.get("sortOrder"), 0))))
+        return result
 
     if collection == "excerpts":
         content = str(item.get("content") or "").strip()[:3000]

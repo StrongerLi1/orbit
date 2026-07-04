@@ -165,12 +165,7 @@ function render() {
   $('#excerpt-count').textContent = `${state.excerpts.length} 条摘录`;
   $('#excerpts-grid').innerHTML = state.excerpts.slice().sort((a, b) => (b.excerptDate || b.createdAt).localeCompare(a.excerptDate || a.createdAt)).map(excerptHtml).join('') || empty('还没有摘录，先留下第一句话吧');
 
-  const categoryOrder = ['AI 与智能体', '开发与学习', '科研与阅读', '校园与办公', '实用工具', 'Mac 软件', '网络与账号', '影音与游戏', '社区与生活', '其他收藏'];
-  const categories = state.folders.map((folder) => folder.name).sort((a, b) => {
-    const left = categoryOrder.indexOf(a), right = categoryOrder.indexOf(b);
-    return (left < 0 ? 999 : left) - (right < 0 ? 999 : right) || a.localeCompare(b, 'zh-CN');
-  });
-  $('#category-filters').innerHTML = categories.map((c) => `<button class="filter ${state.category === c ? 'active':''}" data-category="${escapeHtml(c)}">${escapeHtml(c)}</button>`).join('');
+  $('#category-filters').innerHTML = orderedFolders().map((folder) => `<span class="folder-chip" draggable="true" data-folder-id="${folder.id}"><button class="filter ${state.category === folder.name ? 'active':''}" data-category="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</button><button class="folder-delete" data-delete="folders" data-id="${folder.id}" aria-label="删除收藏夹 ${escapeHtml(folder.name)}">×</button></span>`).join('');
   let visibleBookmarks = state.bookmarks.filter((b) => state.category === '全部' || b.category === state.category);
   if (state.search) visibleBookmarks = visibleBookmarks.filter((b) => `${b.title} ${b.url} ${b.note} ${b.category}`.toLowerCase().includes(state.search));
   visibleBookmarks.sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.title.localeCompare(b.title, 'zh-CN'));
@@ -321,7 +316,8 @@ function renderPlanStatistics() {
 
 function host(url) { try { return new URL(url).hostname.replace(/^www\./,''); } catch { return url; } }
 function netdiskSourceName(source = '') { return netdiskSourceLabels[String(source).toLowerCase()] || source || '其他'; }
-function folderOptions(selected = '') { return state.folders.map((folder) => `<option value="${escapeHtml(folder.name)}" ${folder.name === selected ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join(''); }
+function orderedFolders() { return state.folders.slice().sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || a.name.localeCompare(b.name, 'zh-CN')); }
+function folderOptions(selected = '') { return orderedFolders().map((folder) => `<option value="${escapeHtml(folder.name)}" ${folder.name === selected ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`).join(''); }
 function empty(text) { return `<div class="empty">${text}</div>`; }
 function planHtml(p) { const progress = planProgress(p, dateKey()); const done = progress.done >= progress.target; return `<div class="plan-item"><span class="plan-time">${p.time}</span><span class="plan-dot ${p.color}"></span><span class="plan-name ${done?'todo-title done':''}">${escapeHtml(p.title)}</span><span class="duration">${periodLabel(p)} ${progress.done}/${progress.target}</span></div>`; }
 function timelineHtml(p) { const progress = planProgress(p, state.planDate); const todayCount = Number(p.completions?.[state.planDate] || 0); const done = progress.done >= progress.target; return `<div class="timeline-item recurring"><span class="plan-time">${p.time}</span><span class="plan-dot ${p.color}"></span><div><div class="plan-title-line"><h3 class="${done?'todo-title done':''}">${escapeHtml(p.title)}</h3><span class="type-pill">${planTypeLabels[p.frequencyType]}</span></div><p>${periodLabel(p)} ${progress.done}/${progress.target} 次 · 每次 ${p.duration} 分钟${todayCount ? ` · 今天 ${todayCount} 次` : ''}</p></div><div class="count-stepper"><button data-plan-count="-1" data-id="${p.id}" aria-label="减少 ${escapeHtml(p.title)} 打卡" ${todayCount ? '' : 'disabled'}>−</button><strong>${todayCount}</strong><button data-plan-count="1" data-id="${p.id}" aria-label="完成一次 ${escapeHtml(p.title)}">＋</button></div></div>`; }
@@ -365,7 +361,14 @@ document.addEventListener('click', async (event) => {
     await mutate(() => request(`/api/plans/${item.id}`, { method:'PATCH', body:JSON.stringify({ completions }) }), next ? '打卡成功' : '已撤销一次');
   }
   const del = event.target.closest('[data-delete]');
-  if (del) await mutate(()=>request(`/api/${del.dataset.delete}/${del.dataset.id}`,{method:'DELETE'}),'已删除');
+  if (del) {
+    if (del.dataset.delete === 'folders') {
+      const folder = state.folders.find((item) => item.id === del.dataset.id);
+      if (!confirm(`确定删除收藏夹「${folder?.name || ''}」吗？`)) return;
+      if (state.category === folder?.name) state.category = '全部';
+    }
+    await mutate(()=>request(`/api/${del.dataset.delete}/${del.dataset.id}`,{method:'DELETE'}),'已删除');
+  }
   const adminBan = event.target.closest('[data-admin-ban]');
   if (adminBan) {
     const row = adminBan.closest('[data-role-user]');
@@ -437,6 +440,37 @@ document.addEventListener('change', async (event) => {
   if (!picker) return;
   await mutate(() => request(`/api/bookmarks/${picker.dataset.moveBookmark}`, { method:'PATCH', body:JSON.stringify({ category:picker.value }) }), `已移动到「${picker.value}」`);
 });
+let draggedFolderId = '';
+document.addEventListener('dragstart', (event) => {
+  const chip = event.target.closest('.folder-chip');
+  if (!chip || event.target.closest('[data-delete]')) return;
+  draggedFolderId = chip.dataset.folderId;
+  chip.classList.add('dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', draggedFolderId);
+});
+document.addEventListener('dragover', (event) => {
+  const chip = event.target.closest('.folder-chip');
+  if (!chip || !draggedFolderId) return;
+  event.preventDefault();
+  chip.classList.add('drag-over');
+});
+document.addEventListener('dragleave', (event) => {
+  event.target.closest('.folder-chip')?.classList.remove('drag-over');
+});
+document.addEventListener('drop', async (event) => {
+  const chip = event.target.closest('.folder-chip');
+  if (!chip || !draggedFolderId) return;
+  event.preventDefault();
+  const targetId = chip.dataset.folderId;
+  $$('.folder-chip').forEach((item) => item.classList.remove('drag-over', 'dragging'));
+  await saveFolderOrder(draggedFolderId, targetId);
+  draggedFolderId = '';
+});
+document.addEventListener('dragend', () => {
+  draggedFolderId = '';
+  $$('.folder-chip').forEach((item) => item.classList.remove('drag-over', 'dragging'));
+});
 $('#clear-completed').addEventListener('click', async () => { await Promise.all(state.todos.filter((t)=>t.completed).map((t)=>request(`/api/todos/${t.id}`,{method:'DELETE'}))); await load(); toast('已清空'); });
 $('#global-search').addEventListener('input', (e) => { state.search=e.target.value.trim().toLowerCase(); if(state.search){showPage('bookmarks');location.hash='bookmarks'} render(); });
 $('#plan-date').addEventListener('change', (event) => { if (event.target.value) { state.planDate = event.target.value; render(); } });
@@ -461,6 +495,25 @@ $('#netdisk-form').addEventListener('submit', async (event) => {
 document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape'){closeModal();closeAuthCaptcha();} });
 window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));
 async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
+async function saveFolderOrder(draggedId, targetId) {
+  if (!draggedId || !targetId || draggedId === targetId) return;
+  const folders = orderedFolders();
+  const from = folders.findIndex((folder) => folder.id === draggedId);
+  const to = folders.findIndex((folder) => folder.id === targetId);
+  if (from < 0 || to < 0) return;
+  const [moved] = folders.splice(from, 1);
+  folders.splice(to, 0, moved);
+  state.folders = folders.map((folder, index) => ({ ...folder, sortOrder: index }));
+  render();
+  try {
+    await Promise.all(state.folders.map((folder, index) => request(`/api/folders/${folder.id}`, { method:'PATCH', body:JSON.stringify({ sortOrder:index }) })));
+    await load();
+    toast('收藏夹顺序已更新');
+  } catch (error) {
+    await load();
+    toast(error.message);
+  }
+}
 function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();}
 
 async function boot() {

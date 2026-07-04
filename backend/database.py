@@ -92,6 +92,16 @@ def initialize_database() -> None:
             )
             cursor.execute(
                 """
+                SELECT COUNT(*) AS count
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'folders' AND COLUMN_NAME = 'sort_order'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE folders ADD COLUMN sort_order INT NOT NULL DEFAULT 0 AFTER created_at")
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bookmarks (
                     id VARCHAR(64) PRIMARY KEY,
                     title VARCHAR(300) NOT NULL,
@@ -274,10 +284,10 @@ def replace_all(data: dict[str, list[dict[str, Any]]]) -> None:
             cursor.execute("DELETE FROM todos")
             cursor.execute("DELETE FROM bookmarks")
             cursor.execute("DELETE FROM folders")
-            for folder in reversed(data["folders"]):
+            for index, folder in enumerate(data["folders"]):
                 cursor.execute(
                     "INSERT INTO folders (id, name, created_at, sort_order) VALUES (%s, %s, %s, %s)",
-                    (folder.get("id") or str(uuid.uuid4()), folder.get("name", ""), folder.get("createdAt") or now_iso(), 0),
+                    (folder.get("id") or str(uuid.uuid4()), folder.get("name", ""), folder.get("createdAt") or now_iso(), int(folder.get("sortOrder", index) or 0)),
                 )
             for bookmark in reversed(data["bookmarks"]):
                 cursor.execute(

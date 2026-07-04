@@ -25,7 +25,7 @@ def _plan_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 ROW_MAPPERS = {
-    "folders": lambda row: {"id": row["id"], "name": row["name"], "createdAt": row["created_at"]},
+    "folders": lambda row: {"id": row["id"], "name": row["name"], "sortOrder": row["sort_order"], "createdAt": row["created_at"]},
     "bookmarks": lambda row: {"id": row["id"], "title": row["title"], "url": row["url"], "category": row["category"], "note": row["note"], "favorite": bool(row["favorite"]), "createdAt": row["created_at"]},
     "todos": lambda row: {"id": row["id"], "title": row["title"], "priority": row["priority"], "dueDate": row["due_date"], "completed": bool(row["completed"]), "createdAt": row["created_at"]},
     "plans": _plan_row,
@@ -34,7 +34,7 @@ ROW_MAPPERS = {
 
 
 ORDERS = {
-    "folders": "created_at DESC",
+    "folders": "sort_order ASC, created_at DESC",
     "bookmarks": "created_at DESC",
     "todos": "created_at DESC",
     "plans": "created_at DESC",
@@ -63,7 +63,9 @@ def create_item(collection: str, item: dict[str, Any]) -> dict[str, Any]:
     with connection() as conn:
         with conn.cursor() as cursor:
             if collection == "folders":
-                cursor.execute("INSERT INTO folders (id, name, created_at) VALUES (%s, %s, %s)", (item_id, item["name"], created_at))
+                cursor.execute("SELECT COALESCE(MAX(sort_order) + 1, 0) AS next_order FROM folders")
+                sort_order = item.get("sortOrder", cursor.fetchone()["next_order"])
+                cursor.execute("INSERT INTO folders (id, name, created_at, sort_order) VALUES (%s, %s, %s, %s)", (item_id, item["name"], created_at, sort_order))
             elif collection == "bookmarks":
                 cursor.execute("INSERT INTO bookmarks (id, title, url, category, note, favorite, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)", (item_id, item["title"], item["url"], item["category"], item["note"], 1 if item["favorite"] else 0, created_at))
             elif collection == "todos":
@@ -81,7 +83,7 @@ def update_item(collection: str, item_id: str, item: dict[str, Any]) -> dict[str
     with connection() as conn:
         with conn.cursor() as cursor:
             if collection == "folders":
-                cursor.execute("UPDATE folders SET name = %s WHERE id = %s", (item["name"], item_id))
+                cursor.execute("UPDATE folders SET name = %s, sort_order = %s WHERE id = %s", (item["name"], item["sortOrder"], item_id))
             elif collection == "bookmarks":
                 cursor.execute("UPDATE bookmarks SET title = %s, url = %s, category = %s, note = %s, favorite = %s WHERE id = %s", (item["title"], item["url"], item["category"], item["note"], 1 if item["favorite"] else 0, item_id))
             elif collection == "todos":
