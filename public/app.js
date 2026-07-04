@@ -212,9 +212,12 @@ function renderAdmin() {
     return;
   }
   users.innerHTML = state.admin.users.map((user) => {
+    const isAdmin = user.isAdmin || user.roles.includes('admin');
+    const status = user.isBanned ? '已封禁' : '正常';
     const checks = state.admin.roles.map((role) => `<label class="role-check"><input type="checkbox" data-user-role value="${escapeHtml(role.name)}" ${user.roles.includes(role.name) ? 'checked' : ''}>${escapeHtml(role.name)}</label>`).join('');
     const permissionText = user.permissions.map((permission) => rolePermissionLabel(permission)).join(' · ');
-    return `<article class="admin-user" data-role-user="${escapeHtml(user.id)}"><div><strong>${escapeHtml(user.username)}</strong><small>${escapeHtml(user.isAdmin ? '管理员' : '普通用户')} · ${escapeHtml(user.lastLoginAt || '尚未登录')}</small><p>${escapeHtml(permissionText)}</p></div><div class="role-checks">${checks}</div></article>`;
+    const actions = isAdmin ? '' : `<div class="admin-actions"><button class="secondary" data-admin-ban="${user.isBanned ? 'false' : 'true'}">${user.isBanned ? '解封' : '封禁'}</button><button class="delete-account" data-admin-delete>删除</button></div>`;
+    return `<article class="admin-user" data-role-user="${escapeHtml(user.id)}"><div><strong>${escapeHtml(user.username)}</strong><small>${escapeHtml(isAdmin ? '管理员' : '普通用户')} · ${escapeHtml(status)} · ${escapeHtml(user.lastLoginAt || '尚未登录')}</small><p>${escapeHtml(permissionText)}</p></div><div class="admin-controls"><div class="role-checks">${checks}</div>${actions}</div></article>`;
   }).join('') || empty('还没有用户');
   roles.innerHTML = state.admin.roles.map((role) => {
     const permissions = role.permissions.map((permission) => `<span>${escapeHtml(rolePermissionLabel(permission))}</span>`).join('');
@@ -317,6 +320,36 @@ document.addEventListener('click', async (event) => {
   }
   const del = event.target.closest('[data-delete]');
   if (del) await mutate(()=>request(`/api/${del.dataset.delete}/${del.dataset.id}`,{method:'DELETE'}),'已删除');
+  const adminBan = event.target.closest('[data-admin-ban]');
+  if (adminBan) {
+    const row = adminBan.closest('[data-role-user]');
+    const banned = adminBan.dataset.adminBan === 'true';
+    try {
+      const updated = await request(`/api/admin/users/${row.dataset.roleUser}/ban`, { method:'PATCH', body:JSON.stringify({ banned }) });
+      state.admin.users = state.admin.users.map((user) => user.id === updated.id ? updated : user);
+      renderAdmin();
+      toast(banned ? '账号已封禁' : '账号已解封');
+    } catch (error) {
+      await loadAdmin();
+      toast(error.message);
+    }
+    return;
+  }
+  const adminDelete = event.target.closest('[data-admin-delete]');
+  if (adminDelete) {
+    const row = adminDelete.closest('[data-role-user]');
+    const user = state.admin.users.find((item) => item.id === row.dataset.roleUser);
+    if (!confirm(`确定删除账号「${user?.username || ''}」吗？此操作不可恢复。`)) return;
+    try {
+      await request(`/api/admin/users/${row.dataset.roleUser}`, { method:'DELETE' });
+      await loadAdmin();
+      toast('账号已删除');
+    } catch (error) {
+      await loadAdmin();
+      toast(error.message);
+    }
+    return;
+  }
   const fav = event.target.closest('[data-favorite]');
   if (fav) { const item=state.bookmarks.find((x)=>x.id===fav.dataset.favorite); await mutate(()=>request(`/api/bookmarks/${item.id}`,{method:'PATCH',body:JSON.stringify({favorite:!item.favorite})}),'已更新'); }
   if (event.target.closest('[data-action="quick-add"]')) { const rect=event.target.closest('button').getBoundingClientRect(); const menu=$('#quick-menu'); menu.style.top=`${rect.bottom+8}px`; menu.style.left=`${Math.min(rect.left,innerWidth-180)}px`; menu.hidden=!menu.hidden; }

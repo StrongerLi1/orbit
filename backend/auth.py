@@ -79,6 +79,7 @@ def public_user(row: dict[str, Any]) -> dict[str, Any]:
         "id": row["id"],
         "username": row["username"],
         "isAdmin": "admin" in roles or bool(row["is_admin"]),
+        "isBanned": bool(row.get("is_banned")),
         "roles": roles,
         "permissions": permissions,
         "createdAt": row["created_at"],
@@ -173,6 +174,8 @@ def set_user_roles(user_id: str, roles: list[str]) -> dict[str, Any]:
     current_roles, _ = user_access(user)
     if "admin" in current_roles and "admin" not in wanted and count_admin_users() <= 1:
         raise HTTPException(status_code=409, detail="不能移除最后一个管理员")
+    if "admin" in wanted and bool(user.get("is_banned")):
+        raise HTTPException(status_code=409, detail="请先解除封禁再设为管理员")
 
     with connection() as conn:
         with conn.cursor() as cursor:
@@ -181,6 +184,33 @@ def set_user_roles(user_id: str, roles: list[str]) -> dict[str, Any]:
                 cursor.execute("INSERT INTO user_roles (user_id, role_id) VALUES (%s, %s)", (user_id, role))
             cursor.execute("UPDATE users SET is_admin = %s WHERE id = %s", (1 if "admin" in wanted else 0, user_id))
     return public_user(get_user_by_id(user_id))
+
+
+def _ensure_non_admin_target(user_id: str) -> dict[str, Any]:
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    roles, _ = user_access(user)
+    if "admin" in roles or bool(user.get("is_admin")):
+        raise HTTPException(status_code=409, detail="不能封禁或删除管理员账号")
+    return user
+
+
+def set_user_banned(user_id: str, banned: bool) -> dict[str, Any]:
+    _ensure_non_admin_target(user_id)
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET is_banned = %s WHERE id = %s", (1 if banned else 0, user_id))
+    return public_user(get_user_by_id(user_id))
+
+
+def delete_user_account(user_id: str) -> dict[str, bool]:
+    _ensure_non_admin_target(user_id)
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+    return {"ok": True}
 
 
 def count_admin_users() -> int:
@@ -216,6 +246,11 @@ def touch_login(user_id: str) -> None:
     with connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("UPDATE users SET last_login_at = %s WHERE id = %s", (now_iso(), user_id))
+
+
+def ensure_user_active(user: dict[str, Any]) -> None:
+    if bool(user.get("is_banned")):
+        raise HTTPException(status_code=401, detail="账号已被封禁，请联系管理员")
 
 
 def _redis() -> redis.Redis:
@@ -327,6 +362,7 @@ def require_user(request: Request) -> dict[str, Any]:
     user = get_user_by_id(str(payload.get("sub", "")))
     if not user:
         raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    ensure_user_active(user)
     return attach_user_access(user)
 
 
@@ -348,6 +384,7 @@ def refresh_user(request: Request, response: Response) -> dict[str, Any]:
     user = get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    ensure_user_active(user)
     set_auth_cookies(response, user)
     return user
 
@@ -359,7 +396,7 @@ def seed_admin_user() -> None:
     if existing:
         with connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("UPDATE users SET is_admin = 1 WHERE id = %s", (existing["id"],))
+                cursor.execute("UPDATE users SET is_admin = 1, is_banned = 0 WHERE id = %s", (existing["id"],))
         set_user_roles(existing["id"], ["admin"])
         return
     create_user(settings.admin_username, settings.admin_password, is_admin=True)

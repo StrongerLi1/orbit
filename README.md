@@ -72,7 +72,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
 - `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/refresh`，`POST /api/auth/logout`，`GET /api/auth/me`
-- `GET /api/admin/users`，`PATCH /api/admin/users/:id/roles`
+- `GET /api/admin/users`，`PATCH /api/admin/users/:id/roles`，`PATCH /api/admin/users/:id/ban`，`DELETE /api/admin/users/:id`
 - `GET /api/admin/roles`，`GET /api/admin/permissions`
 
 ## 网盘搜索

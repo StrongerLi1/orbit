@@ -13,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from .auth import (
     clear_auth_cookies,
     create_user,
+    delete_user_account,
+    ensure_user_active,
     get_user_by_username,
     list_permissions,
     list_roles,
@@ -22,6 +24,7 @@ from .auth import (
     refresh_user,
     require_user,
     revoke_refresh_token,
+    set_user_banned,
     set_auth_cookies,
     set_user_roles,
     touch_login,
@@ -220,6 +223,7 @@ async def auth_login(request: Request, response: Response):
     user = get_user_by_username(username)
     if not user or not verify_password(password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="用户名或密码不正确")
+    ensure_user_active(user)
     touch_login(user["id"])
     user["last_login_at"] = user.get("last_login_at") or ""
     set_auth_cookies(response, user)
@@ -294,6 +298,19 @@ async def admin_update_user_roles(user_id: str, request: Request):
     data = await request.json()
     roles = data.get("roles") if isinstance(data.get("roles"), list) else []
     return set_user_roles(user_id, roles)
+
+
+@app.patch("/api/admin/users/{user_id}/ban")
+async def admin_update_user_ban(user_id: str, request: Request):
+    require_permission(request, "users:manage")
+    data = await request.json()
+    return set_user_banned(user_id, bool(data.get("banned")))
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(user_id: str, request: Request):
+    require_permission(request, "users:manage")
+    return delete_user_account(user_id)
 
 
 @app.get("/api/admin/roles")

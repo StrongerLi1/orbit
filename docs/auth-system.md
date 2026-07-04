@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(64) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     is_admin TINYINT(1) NOT NULL DEFAULT 0,
+    is_banned TINYINT(1) NOT NULL DEFAULT 0,
     created_at VARCHAR(40) NOT NULL,
     last_login_at VARCHAR(40) NOT NULL
 )
@@ -208,10 +209,11 @@ Cookie 配置：
 1. 校验用户名和密码格式。
 2. 从 MySQL 查询用户。
 3. 使用 PBKDF2 校验密码。
-4. 更新 `last_login_at`。
-5. 签发 access token 和 refresh token。
-6. 写入 Redis refresh key。
-7. 设置 Cookie 并返回用户信息。
+4. 拒绝已封禁用户。
+5. 更新 `last_login_at`。
+6. 签发 access token 和 refresh token。
+7. 写入 Redis refresh key。
+8. 设置 Cookie 并返回用户信息。
 
 ### `GET /api/auth/me`
 
@@ -222,7 +224,8 @@ Cookie 配置：
 1. 读取 `orbit_access` Cookie。
 2. 校验 JWT 签名、类型和过期时间。
 3. 根据 `sub` 查询 MySQL 用户。
-4. 返回公开用户信息。
+4. 拒绝已封禁用户。
+5. 返回公开用户信息。
 
 如果 access token 不存在、过期或无效，返回 401。
 
@@ -233,6 +236,7 @@ Cookie 配置：
   "id": "用户 ID",
   "username": "admin",
   "isAdmin": true,
+  "isBanned": false,
   "roles": ["admin"],
   "permissions": ["content:read", "content:write", "netdisk:search", "users:manage", "roles:manage"],
   "createdAt": "创建时间",
@@ -250,10 +254,11 @@ Cookie 配置：
 2. 校验 JWT 签名、类型和过期时间。
 3. 获取 refresh token 中的 `jti` 和用户 ID。
 4. 检查 Redis 中 `orbit:refresh:<jti>` 是否存在且 value 等于用户 ID。
-5. 删除旧 refresh key。
-6. 重新签发一组新的 access token 和 refresh token。
-7. 将新的 refresh `jti` 写入 Redis。
-8. 更新 Cookie。
+5. 拒绝已封禁用户。
+6. 删除旧 refresh key。
+7. 重新签发一组新的 access token 和 refresh token。
+8. 将新的 refresh `jti` 写入 Redis。
+9. 更新 Cookie。
 
 这个流程叫 refresh token rotation：每次刷新都会让旧 refresh token 失效。
 
@@ -271,7 +276,7 @@ Cookie 配置：
 
 ## 业务接口保护
 
-后端登录检查由 `require_user(request)` 完成，权限检查由 `require_permission(request, permission)` 完成。业务 API 不直接检查角色名，只检查权限：
+后端登录检查由 `require_user(request)` 完成，权限检查由 `require_permission(request, permission)` 完成。`require_user` 会拒绝已封禁用户，因此已有 access token 的封禁用户也无法继续访问业务接口。业务 API 不直接检查角色名，只检查权限：
 
 | API | 权限 |
 | --- | --- |
@@ -299,6 +304,8 @@ RBAC 管理接口只允许拥有对应权限的管理员访问：
 | --- | --- | --- |
 | `GET /api/admin/users` | `users:manage` | 查看用户及其角色/权限 |
 | `PATCH /api/admin/users/{user_id}/roles` | `users:manage` | 修改用户角色，body 为 `{"roles":["admin"]}` 或 `{"roles":["user"]}` |
+| `PATCH /api/admin/users/{user_id}/ban` | `users:manage` | 封禁或解封非管理员用户，body 为 `{"banned":true}` 或 `{"banned":false}` |
+| `DELETE /api/admin/users/{user_id}` | `users:manage` | 硬删除非管理员用户，并清理其角色关系 |
 | `GET /api/admin/roles` | `roles:manage` | 查看固定角色 |
 | `GET /api/admin/permissions` | `roles:manage` | 查看固定权限 |
 
@@ -307,8 +314,11 @@ RBAC 管理接口只允许拥有对应权限的管理员访问：
 - 未知角色。
 - 空角色列表。
 - 移除系统中最后一个管理员。
+- 将已封禁用户提升为管理员。
+- 封禁、解封或删除管理员账号。
 
 角色变更会同步更新 `users.is_admin`，用于兼容旧逻辑和迁移记录。
+封禁是简单的永久开关，不记录原因或到期时间；删除是硬删除，删除后相同用户名可以重新注册。
 
 ## 前端逻辑
 
@@ -364,8 +374,10 @@ if (!location.hash) { showAuth('login'); return; }
 - `/api/admin/users`
 - `/api/admin/roles`
 - `/api/admin/permissions`
+- `/api/admin/users/{user_id}/ban`
+- `/api/admin/users/{user_id}`
 
-页面只支持给用户分配固定 `admin` / `user` 角色，不支持创建新角色或编辑权限矩阵。普通用户不会看到入口；如果直接访问 `/#admin`，前端会回到概览页，后端仍会对 admin API 返回 403。
+页面支持给用户分配固定 `admin` / `user` 角色，也支持封禁、解封和删除非管理员账号。删除账号前会使用浏览器原生确认框进行二次确认。页面不支持创建新角色或编辑权限矩阵。普通用户不会看到入口；如果直接访问 `/#admin`，前端会回到概览页，后端仍会对 admin API 返回 403。
 
 ## 环境变量
 
@@ -504,8 +516,9 @@ curl -b /tmp/orbit.cookie -c /tmp/orbit.cookie \
 
 - 未登录业务接口返回 401。
 - 登录后 Cookie 中有 `orbit_access` 和 `orbit_refresh`。
-- `/api/auth/me` 返回 `roles` 和 `permissions`。
+- `/api/auth/me` 返回 `roles`、`permissions` 和 `isBanned`。
 - 普通用户访问 `/api/admin/users` 返回 403。
+- 已封禁用户无法登录、refresh 或继续访问受保护业务接口。
 - refresh 后旧 refresh token 不能再使用。
 - logout 后访问 `/api/auth/me` 返回 401。
 - logout 后 Redis 中对应 refresh key 被删除。
