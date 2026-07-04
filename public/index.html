@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260704-rbac">
+  <link rel="stylesheet" href="/styles.css?v=20260704-mobile-captcha">
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -97,7 +97,7 @@
 
         <section class="page" id="bookmarks">
           <div class="page-title"><div><p class="eyebrow">YOUR COLLECTION</p><h1>收藏夹</h1><p>把散落在网络里的好东西放在这里。</p></div><button class="primary" data-add="bookmarks">＋ 添加网站</button></div>
-          <div class="filters"><button class="filter active" data-category="全部">全部</button><div id="category-filters"></div><button class="new-folder" data-add="folders">＋ 新建收藏夹</button></div>
+          <div class="filters" id="bookmarks-filters"><button class="filter active" data-category="全部">全部</button><div id="category-filters"></div><button class="tag-manage" id="folder-manage" data-folder-manage hidden>管理标签</button><button class="new-folder" data-add="folders">＋ 新建收藏夹</button></div>
           <div id="bookmarks-grid" class="bookmarks-grid"></div>
         </section>
 
@@ -161,6 +161,6 @@
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20260704-folders"></script>
+  <script src="/app.js?v=20260704-folder-manage"></script>
 </body>
 </html>

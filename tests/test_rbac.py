@@ -26,6 +26,7 @@ def main() -> None:
     assert user["isAdmin"] is False
     assert user["isBanned"] is True
     assert user["roles"] == ["user"]
+    assert "folders:manage" not in user["permissions"]
     assert "users:manage" not in user["permissions"]
     try:
         ensure_user_active({"is_banned": 1})
@@ -44,6 +45,7 @@ def main() -> None:
     })
     assert admin["isAdmin"] is True
     assert admin["isBanned"] is False
+    assert "folders:manage" in admin["permissions"]
     assert "users:manage" in admin["permissions"]
     ensure_user_active({"is_banned": 0})
 

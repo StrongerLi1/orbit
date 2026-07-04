@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -8,6 +8,7 @@ const planTypeLabels = { daily: '日常', weekly: '周常', monthly: '月度' };
 const netdiskSourceLabels = { baidu: '百度网盘', quark: '夸克网盘', aliyun: '阿里云盘', xunlei: '迅雷云盘', tianyi: '天翼云盘', uc: 'UC 网盘', mobile: '移动云盘', pikpak: 'PikPak', '123pan': '123 网盘', '115': '115 网盘' };
 const hasPermission = (permission) => state.user?.permissions?.includes(permission);
 const canManageAccess = () => hasPermission('users:manage') || hasPermission('roles:manage');
+const canManageFolders = () => hasPermission('folders:manage');
 
 function isPlanActive(plan, date) { return date >= plan.startDate && (!plan.endDate || date <= plan.endDate); }
 function plansForDate(date) { return state.plans.filter((plan) => isPlanActive(plan, date)); }
@@ -165,7 +166,15 @@ function render() {
   $('#excerpt-count').textContent = `${state.excerpts.length} 条摘录`;
   $('#excerpts-grid').innerHTML = state.excerpts.slice().sort((a, b) => (b.excerptDate || b.createdAt).localeCompare(a.excerptDate || a.createdAt)).map(excerptHtml).join('') || empty('还没有摘录，先留下第一句话吧');
 
-  $('#category-filters').innerHTML = orderedFolders().map((folder) => `<span class="folder-chip" draggable="true" data-folder-id="${folder.id}"><button class="filter ${state.category === folder.name ? 'active':''}" data-category="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</button><button class="folder-delete" data-delete="folders" data-id="${folder.id}" aria-label="删除收藏夹 ${escapeHtml(folder.name)}">×</button></span>`).join('');
+  if (!canManageFolders()) state.folderManaging = false;
+  $('#bookmarks-filters')?.classList.toggle('managing', state.folderManaging);
+  const manage = $('#folder-manage');
+  if (manage) {
+    manage.hidden = !canManageFolders();
+    manage.textContent = state.folderManaging ? '完成管理' : '管理标签';
+    manage.classList.toggle('active', state.folderManaging);
+  }
+  $('#category-filters').innerHTML = orderedFolders().map((folder) => state.folderManaging ? `<span class="folder-chip" draggable="true" data-folder-id="${folder.id}"><button class="filter ${state.category === folder.name ? 'active':''}" data-category="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</button><button class="folder-delete" data-delete="folders" data-id="${folder.id}" aria-label="删除收藏夹 ${escapeHtml(folder.name)}">×</button></span>` : `<button class="filter ${state.category === folder.name ? 'active':''}" data-category="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</button>`).join('');
   let visibleBookmarks = state.bookmarks.filter((b) => state.category === '全部' || b.category === state.category);
   if (state.search) visibleBookmarks = visibleBookmarks.filter((b) => `${b.title} ${b.url} ${b.note} ${b.category}`.toLowerCase().includes(state.search));
   visibleBookmarks.sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.title.localeCompare(b.title, 'zh-CN'));
@@ -350,6 +359,7 @@ document.addEventListener('click', async (event) => {
   if (event.target.closest('#modal .close') || event.target === $('#modal')) closeModal();
   if (event.target.closest('#auth-captcha-modal .close') || event.target === $('#auth-captcha-modal')) closeAuthCaptcha();
   const category = event.target.closest('[data-category]'); if (category) { state.category=category.dataset.category; render(); }
+  if (event.target.closest('[data-folder-manage]')) { state.folderManaging = !state.folderManaging; render(); }
   const toggle = event.target.closest('[data-toggle]');
   if (toggle) { const type=toggle.dataset.toggle; const item=state[type].find((x)=>x.id===toggle.dataset.id); await mutate(()=>request(`/api/${type}/${item.id}`,{method:'PATCH',body:JSON.stringify({completed:!item.completed})}),'已更新'); }
   const planCount = event.target.closest('[data-plan-count]');
@@ -443,7 +453,7 @@ document.addEventListener('change', async (event) => {
 let draggedFolderId = '';
 document.addEventListener('dragstart', (event) => {
   const chip = event.target.closest('.folder-chip');
-  if (!chip || event.target.closest('[data-delete]')) return;
+  if (!state.folderManaging || !chip || event.target.closest('[data-delete]')) return;
   draggedFolderId = chip.dataset.folderId;
   chip.classList.add('dragging');
   event.dataTransfer.effectAllowed = 'move';
@@ -451,7 +461,7 @@ document.addEventListener('dragstart', (event) => {
 });
 document.addEventListener('dragover', (event) => {
   const chip = event.target.closest('.folder-chip');
-  if (!chip || !draggedFolderId) return;
+  if (!state.folderManaging || !chip || !draggedFolderId) return;
   event.preventDefault();
   chip.classList.add('drag-over');
 });
@@ -460,7 +470,7 @@ document.addEventListener('dragleave', (event) => {
 });
 document.addEventListener('drop', async (event) => {
   const chip = event.target.closest('.folder-chip');
-  if (!chip || !draggedFolderId) return;
+  if (!state.folderManaging || !chip || !draggedFolderId) return;
   event.preventDefault();
   const targetId = chip.dataset.folderId;
   $$('.folder-chip').forEach((item) => item.classList.remove('drag-over', 'dragging'));

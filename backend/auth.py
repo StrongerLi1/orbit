@@ -25,6 +25,7 @@ PERMISSIONS = {
     "content:read": "读取共享业务数据",
     "content:write": "新增、修改和删除共享业务数据",
     "netdisk:search": "使用网盘搜索",
+    "folders:manage": "管理收藏夹标签",
     "users:manage": "管理用户和用户角色",
     "roles:manage": "查看角色和权限",
 }

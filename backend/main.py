@@ -364,7 +364,10 @@ async def api_update(collection: str, item_id: str, request: Request):
     existing = get_item(collection, item_id)
     if not existing:
         raise HTTPException(status_code=404, detail="记录不存在")
-    valid = validate(collection, {**existing, **await request.json()})
+    data = await request.json()
+    if collection == "folders" and "sortOrder" in data:
+        require_permission(request, "folders:manage")
+    valid = validate(collection, {**existing, **data})
     return update_item(collection, item_id, valid)
 
 
@@ -373,6 +376,8 @@ def api_delete(collection: str, item_id: str, request: Request):
     require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
+    if collection == "folders":
+        require_permission(request, "folders:manage")
     existing = get_item(collection, item_id)
     if not existing:
         raise HTTPException(status_code=404, detail="记录不存在")
