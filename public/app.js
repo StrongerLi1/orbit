@@ -386,11 +386,12 @@ function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id=
 
 async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;
-  if (!location.hash) { showAuth('login'); return; }
   try {
     state.user = await request('/api/auth/me');
     showApp();
-    showPage(location.hash.slice(1)||'dashboard');
+    const page = location.hash.slice(1) || 'dashboard';
+    if (!location.hash) location.hash = page;
+    showPage(page);
     await load();
   } catch {
     showAuth('login');
