@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { login: '', register: '' } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -70,7 +70,6 @@ function showAuth(mode = 'login') {
   $('#register-form').hidden = mode !== 'register';
   $('#auth-title').textContent = mode === 'login' ? '登录你的空间' : '注册新账号';
   $('#auth-switch').textContent = mode === 'login' ? '还没有账号？注册一个' : '已有账号？返回登录';
-  updateAuthCaptchaState(mode);
   setTimeout(() => $(`#${mode}-form input`)?.focus(), 50);
 }
 
@@ -83,59 +82,56 @@ function showApp() {
 
 async function authSubmit(path, form) {
   const mode = form.id === 'register-form' ? 'register' : 'login';
-  if (!state.captcha[mode]) {
-    toast('请先完成抓娃娃验证');
-    return;
-  }
-  const payload = Object.fromEntries(new FormData(form));
-  state.user = await request(path, { method:'POST', body:JSON.stringify({ ...payload, playcaptchaToken: state.captcha[mode] }) });
+  showAuthCaptcha({ mode, path, payload: Object.fromEntries(new FormData(form)) });
+}
+
+async function finishAuthSubmit(playcaptchaToken) {
+  const pending = state.captcha.pending;
+  if (!pending || state.captcha.busy) return;
+  state.captcha.busy = true;
+  $('#auth-captcha-status').textContent = '验证成功，正在继续...';
+  state.user = await request(pending.path, { method:'POST', body:JSON.stringify({ ...pending.payload, playcaptchaToken }) });
+  closeAuthCaptcha();
   showApp();
   location.hash = 'dashboard';
   showPage('dashboard');
   await load();
+  toast(pending.mode === 'login' ? '欢迎回来' : '注册成功');
 }
 
-function updateAuthCaptchaState(mode) {
-  const verified = Boolean(state.captcha[mode]);
-  const button = $(`[data-auth-submit="${mode}"]`);
-  const status = $(`[data-captcha-status="${mode}"]`);
-  if (button) button.disabled = !verified;
-  if (status) {
-    status.textContent = verified ? '验证完成，可以继续。' : (mode === 'login' ? '完成抓娃娃验证后即可登录。' : '完成抓娃娃验证后即可注册。');
-    status.classList.toggle('ready', verified);
-  }
+function showAuthCaptcha(pending) {
+  state.captcha.pending = pending;
+  state.captcha.busy = false;
+  $('#auth-captcha-status').textContent = '';
+  $('#auth-captcha-modal').hidden = false;
+  mountAuthCaptcha();
+  window.orbitPlayCaptcha?.reset('auth');
 }
 
-function resetAuthCaptcha(mode) {
-  state.captcha[mode] = '';
-  updateAuthCaptchaState(mode);
-  window.orbitPlayCaptcha?.reset(mode);
+function closeAuthCaptcha() {
+  $('#auth-captcha-modal').hidden = true;
+  state.captcha.pending = null;
+  state.captcha.busy = false;
 }
 
-function mountPlayCaptcha(mode) {
-  const element = $(`[data-playcaptcha="${mode}"]`);
-  if (!element || !window.orbitPlayCaptcha) return;
+function mountAuthCaptcha() {
+  const element = $('[data-playcaptcha="auth"]');
+  if (!element || !window.orbitPlayCaptcha || state.captcha.mounted) return;
   window.orbitPlayCaptcha.mount({
     element,
-    mode,
+    mode: 'auth',
     onVerified: async () => {
       try {
-        const result = await request('/api/auth/playcaptcha', { method:'POST', body:JSON.stringify({ mode }) }, false);
-        state.captcha[mode] = result.token || '';
-        updateAuthCaptchaState(mode);
+        const result = await request('/api/auth/playcaptcha', { method:'POST' }, false);
+        await finishAuthSubmit(result.token || '');
       } catch (error) {
-        resetAuthCaptcha(mode);
+        closeAuthCaptcha();
+        window.orbitPlayCaptcha?.reset('auth');
         toast(error.message);
       }
     },
   });
-}
-
-function mountPlayCaptchas() {
-  mountPlayCaptcha('login');
-  mountPlayCaptcha('register');
-  updateAuthCaptchaState('login');
-  updateAuthCaptchaState('register');
+  state.captcha.mounted = true;
 }
 
 async function load() {
@@ -355,7 +351,8 @@ document.addEventListener('click', async (event) => {
   const pageLink = event.target.closest('[data-page],[data-page-link]');
   if (pageLink) { const page=pageLink.dataset.page || pageLink.dataset.pageLink; location.hash=page; showPage(page); }
   const add = event.target.closest('[data-add]'); if (add) openModal(add.dataset.add);
-  if (event.target.closest('.close') || event.target === $('#modal')) closeModal();
+  if (event.target.closest('#modal .close') || event.target === $('#modal')) closeModal();
+  if (event.target.closest('#auth-captcha-modal .close') || event.target === $('#auth-captcha-modal')) closeAuthCaptcha();
   const category = event.target.closest('[data-category]'); if (category) { state.category=category.dataset.category; render(); }
   const toggle = event.target.closest('[data-toggle]');
   if (toggle) { const type=toggle.dataset.toggle; const item=state[type].find((x)=>x.id===toggle.dataset.id); await mutate(()=>request(`/api/${type}/${item.id}`,{method:'PATCH',body:JSON.stringify({completed:!item.completed})}),'已更新'); }
@@ -444,8 +441,8 @@ $('#clear-completed').addEventListener('click', async () => { await Promise.all(
 $('#global-search').addEventListener('input', (e) => { state.search=e.target.value.trim().toLowerCase(); if(state.search){showPage('bookmarks');location.hash='bookmarks'} render(); });
 $('#plan-date').addEventListener('change', (event) => { if (event.target.value) { state.planDate = event.target.value; render(); } });
 $('#auth-switch').addEventListener('click', () => showAuth(state.authMode === 'login' ? 'register' : 'login'));
-$('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/login', event.currentTarget); toast('欢迎回来'); } catch (e) { resetAuthCaptcha('login'); toast(e.message); } });
-$('#register-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/register', event.currentTarget); toast('注册成功'); } catch (e) { resetAuthCaptcha('register'); toast(e.message); } });
+$('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); await authSubmit('/api/auth/login', event.currentTarget); });
+$('#register-form').addEventListener('submit', async (event) => { event.preventDefault(); await authSubmit('/api/auth/register', event.currentTarget); });
 $('#logout-btn').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST' }).catch(() => null); showAuth('login'); toast('已退出'); });
 $('#netdisk-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -461,7 +458,7 @@ $('#netdisk-form').addEventListener('submit', async (event) => {
   }
   renderNetdisk();
 });
-document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape')closeModal(); });
+document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape'){closeModal();closeAuthCaptcha();} });
 window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));
 async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
 function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();}
@@ -479,6 +476,6 @@ async function boot() {
     showAuth('login');
   }
 }
-if (window.orbitPlayCaptcha) mountPlayCaptchas();
-else window.addEventListener('orbit:playcaptcha-ready', mountPlayCaptchas, { once: true });
+if (window.orbitPlayCaptcha) mountAuthCaptcha();
+else window.addEventListener('orbit:playcaptcha-ready', mountAuthCaptcha, { once: true });
 boot();

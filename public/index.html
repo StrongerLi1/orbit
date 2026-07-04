@@ -22,16 +22,12 @@
       <form id="login-form" class="auth-form">
         <div class="field"><label>用户名</label><input name="username" autocomplete="username" required minlength="3" maxlength="32" placeholder="admin"></div>
         <div class="field"><label>密码</label><input name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="至少 8 位"></div>
-        <div class="auth-captcha" data-playcaptcha="login"></div>
-        <p class="auth-captcha-status" data-captcha-status="login">完成抓娃娃验证后即可登录。</p>
-        <button class="primary" data-auth-submit="login" type="submit" disabled>登录</button>
+        <button class="primary" type="submit">登录</button>
       </form>
       <form id="register-form" class="auth-form" hidden>
         <div class="field"><label>用户名</label><input name="username" autocomplete="username" required minlength="3" maxlength="32" placeholder="字母、数字、下划线"></div>
         <div class="field"><label>密码</label><input name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="至少 8 位"></div>
-        <div class="auth-captcha" data-playcaptcha="register"></div>
-        <p class="auth-captcha-status" data-captcha-status="register">完成抓娃娃验证后即可注册。</p>
-        <button class="primary" data-auth-submit="register" type="submit" disabled>注册并进入</button>
+        <button class="primary" type="submit">注册并进入</button>
       </form>
       <button class="text-btn auth-switch" id="auth-switch" type="button">还没有账号？注册一个</button>
     </section>
@@ -153,6 +149,13 @@
 
   <div class="modal-backdrop" id="modal" hidden>
     <div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><span class="label" id="modal-label">NEW ITEM</span><h2 id="modal-title">添加</h2></div><button class="close" aria-label="关闭">×</button></div><form id="item-form"><div id="form-fields"></div><div class="form-actions"><button type="button" class="secondary close">取消</button><button type="submit" class="primary">保存</button></div></form></div>
+  </div>
+  <div class="modal-backdrop auth-captcha-modal" id="auth-captcha-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-captcha-title">
+      <div class="modal-head"><div><span class="label">VERIFY</span><h2 id="auth-captcha-title">完成验证</h2></div><button class="close" aria-label="关闭">×</button></div>
+      <div class="auth-captcha" data-playcaptcha="auth"></div>
+      <p class="auth-captcha-status" id="auth-captcha-status"></p>
+    </div>
   </div>
   <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
   <div id="toast" class="toast"></div>
