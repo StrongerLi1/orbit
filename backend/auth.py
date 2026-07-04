@@ -19,6 +19,7 @@ ACCESS_COOKIE = "orbit_access"
 REFRESH_COOKIE = "orbit_refresh"
 OLD_SESSION_COOKIE = "orbit_session"
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+PLAYCAPTCHA_TOKEN_SECONDS = 5 * 60
 
 PERMISSIONS = {
     "content:read": "读取共享业务数据",
@@ -303,6 +304,19 @@ def _jwt_decode(token: str, token_type: str) -> dict[str, Any]:
         return payload
     except Exception as error:
         raise HTTPException(status_code=401, detail="请先登录") from error
+
+
+def issue_playcaptcha_token() -> str:
+    return _jwt_encode({"typ": "playcaptcha", "jti": str(uuid.uuid4())}, PLAYCAPTCHA_TOKEN_SECONDS)
+
+
+def require_playcaptcha_token(token: str) -> None:
+    if not token:
+        raise HTTPException(status_code=422, detail="请先完成抓娃娃验证")
+    try:
+        _jwt_decode(token, "playcaptcha")
+    except HTTPException as error:
+        raise HTTPException(status_code=422, detail="抓娃娃验证已过期，请重新完成验证") from error
 
 
 def _refresh_key(jti: str) -> str:

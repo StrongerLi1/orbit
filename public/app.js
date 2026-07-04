@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { login: '', register: '' } };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -70,6 +70,7 @@ function showAuth(mode = 'login') {
   $('#register-form').hidden = mode !== 'register';
   $('#auth-title').textContent = mode === 'login' ? '登录你的空间' : '注册新账号';
   $('#auth-switch').textContent = mode === 'login' ? '还没有账号？注册一个' : '已有账号？返回登录';
+  updateAuthCaptchaState(mode);
   setTimeout(() => $(`#${mode}-form input`)?.focus(), 50);
 }
 
@@ -81,12 +82,60 @@ function showApp() {
 }
 
 async function authSubmit(path, form) {
+  const mode = form.id === 'register-form' ? 'register' : 'login';
+  if (!state.captcha[mode]) {
+    toast('请先完成抓娃娃验证');
+    return;
+  }
   const payload = Object.fromEntries(new FormData(form));
-  state.user = await request(path, { method:'POST', body:JSON.stringify(payload) });
+  state.user = await request(path, { method:'POST', body:JSON.stringify({ ...payload, playcaptchaToken: state.captcha[mode] }) });
   showApp();
   location.hash = 'dashboard';
   showPage('dashboard');
   await load();
+}
+
+function updateAuthCaptchaState(mode) {
+  const verified = Boolean(state.captcha[mode]);
+  const button = $(`[data-auth-submit="${mode}"]`);
+  const status = $(`[data-captcha-status="${mode}"]`);
+  if (button) button.disabled = !verified;
+  if (status) {
+    status.textContent = verified ? '验证完成，可以继续。' : (mode === 'login' ? '完成抓娃娃验证后即可登录。' : '完成抓娃娃验证后即可注册。');
+    status.classList.toggle('ready', verified);
+  }
+}
+
+function resetAuthCaptcha(mode) {
+  state.captcha[mode] = '';
+  updateAuthCaptchaState(mode);
+  window.orbitPlayCaptcha?.reset(mode);
+}
+
+function mountPlayCaptcha(mode) {
+  const element = $(`[data-playcaptcha="${mode}"]`);
+  if (!element || !window.orbitPlayCaptcha) return;
+  window.orbitPlayCaptcha.mount({
+    element,
+    mode,
+    onVerified: async () => {
+      try {
+        const result = await request('/api/auth/playcaptcha', { method:'POST', body:JSON.stringify({ mode }) }, false);
+        state.captcha[mode] = result.token || '';
+        updateAuthCaptchaState(mode);
+      } catch (error) {
+        resetAuthCaptcha(mode);
+        toast(error.message);
+      }
+    },
+  });
+}
+
+function mountPlayCaptchas() {
+  mountPlayCaptcha('login');
+  mountPlayCaptcha('register');
+  updateAuthCaptchaState('login');
+  updateAuthCaptchaState('register');
 }
 
 async function load() {
@@ -395,8 +444,8 @@ $('#clear-completed').addEventListener('click', async () => { await Promise.all(
 $('#global-search').addEventListener('input', (e) => { state.search=e.target.value.trim().toLowerCase(); if(state.search){showPage('bookmarks');location.hash='bookmarks'} render(); });
 $('#plan-date').addEventListener('change', (event) => { if (event.target.value) { state.planDate = event.target.value; render(); } });
 $('#auth-switch').addEventListener('click', () => showAuth(state.authMode === 'login' ? 'register' : 'login'));
-$('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/login', event.currentTarget); toast('欢迎回来'); } catch (e) { toast(e.message); } });
-$('#register-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/register', event.currentTarget); toast('注册成功'); } catch (e) { toast(e.message); } });
+$('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/login', event.currentTarget); toast('欢迎回来'); } catch (e) { resetAuthCaptcha('login'); toast(e.message); } });
+$('#register-form').addEventListener('submit', async (event) => { event.preventDefault(); try { await authSubmit('/api/auth/register', event.currentTarget); toast('注册成功'); } catch (e) { resetAuthCaptcha('register'); toast(e.message); } });
 $('#logout-btn').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST' }).catch(() => null); showAuth('login'); toast('已退出'); });
 $('#netdisk-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -430,4 +479,6 @@ async function boot() {
     showAuth('login');
   }
 }
+if (window.orbitPlayCaptcha) mountPlayCaptchas();
+else window.addEventListener('orbit:playcaptcha-ready', mountPlayCaptchas, { once: true });
 boot();

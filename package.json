@@ -4,11 +4,20 @@
   "private": true,
   "description": "A calm personal hub for bookmarks, plans and todos.",
   "scripts": {
+    "build:captcha": "node scripts/build-playcaptcha.mjs",
     "dev": "uvicorn backend.main:app --host 0.0.0.0 --port 3000 --reload",
     "start": "python3 run.py",
     "test": "python3 -m compileall backend run.py tests && python3 tests/test_rbac.py"
   },
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "playcaptcha": "^0.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
   }
 }

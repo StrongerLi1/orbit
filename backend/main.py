@@ -16,6 +16,7 @@ from .auth import (
     delete_user_account,
     ensure_user_active,
     get_user_by_username,
+    issue_playcaptcha_token,
     list_permissions,
     list_roles,
     list_users,
@@ -23,6 +24,7 @@ from .auth import (
     require_permission,
     refresh_user,
     require_user,
+    require_playcaptcha_token,
     revoke_refresh_token,
     set_user_banned,
     set_auth_cookies,
@@ -208,9 +210,15 @@ def auth_me(request: Request):
     return public_user(require_user(request))
 
 
+@app.post("/api/auth/playcaptcha")
+def auth_playcaptcha():
+    return {"token": issue_playcaptcha_token()}
+
+
 @app.post("/api/auth/register", status_code=201)
 async def auth_register(request: Request, response: Response):
     data = await request.json()
+    require_playcaptcha_token(str(data.get("playcaptchaToken") or ""))
     user = create_user(data.get("username", ""), data.get("password", ""))
     set_auth_cookies(response, user)
     return public_user(user)
@@ -219,6 +227,7 @@ async def auth_register(request: Request, response: Response):
 @app.post("/api/auth/login")
 async def auth_login(request: Request, response: Response):
     data = await request.json()
+    require_playcaptcha_token(str(data.get("playcaptchaToken") or ""))
     username, password = validate_credentials_input(data.get("username", ""), data.get("password", ""))
     user = get_user_by_username(username)
     if not user or not verify_password(password, user["password_hash"]):
