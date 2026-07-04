@@ -51,6 +51,10 @@ npm start
 
 登录态使用双 JWT：短期 access token 放 HttpOnly Cookie，长期 refresh token 放 HttpOnly Cookie，并在 Redis 中保存 refresh token 的 jti，用于续期和退出登录时失效。
 
+用户权限使用固定 RBAC 角色：`admin` 拥有全部权限，`user` 可以使用共享业务功能和网盘搜索。当前版本保留公开注册，新用户默认获得 `user` 角色；业务数据仍然是共享数据，尚未按用户隔离。
+
+登录系统的完整设计和开发说明见 [`docs/auth-system.md`](docs/auth-system.md)。
+
 如果配置了 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`，启动时会自动创建或修正管理员账户。
 
 可以直接导入 Chrome、Edge 等浏览器导出的 Netscape 书签 HTML，脚本会清理标题、自动分类并按 URL 去重：
@@ -68,6 +72,8 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
 - `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/refresh`，`POST /api/auth/logout`，`GET /api/auth/me`
+- `GET /api/admin/users`，`PATCH /api/admin/users/:id/roles`
+- `GET /api/admin/roles`，`GET /api/admin/permissions`
 
 ## 网盘搜索
 

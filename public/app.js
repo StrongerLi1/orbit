@@ -1,11 +1,13 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' } };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
 const planTypeLabels = { daily: '日常', weekly: '周常', monthly: '月度' };
 const netdiskSourceLabels = { baidu: '百度网盘', quark: '夸克网盘', aliyun: '阿里云盘', xunlei: '迅雷云盘', tianyi: '天翼云盘', uc: 'UC 网盘', mobile: '移动云盘', pikpak: 'PikPak', '123pan': '123 网盘', '115': '115 网盘' };
+const hasPermission = (permission) => state.user?.permissions?.includes(permission);
+const canManageAccess = () => hasPermission('users:manage') || hasPermission('roles:manage');
 
 function isPlanActive(plan, date) { return date >= plan.startDate && (!plan.endDate || date <= plan.endDate); }
 function plansForDate(date) { return state.plans.filter((plan) => isPlanActive(plan, date)); }
@@ -75,6 +77,7 @@ function showApp() {
   $('#auth-screen').hidden = true;
   $('.app-shell').hidden = false;
   $('#user-chip').textContent = state.user ? `${state.user.username}${state.user.isAdmin ? ' · 管理员' : ''}` : '';
+  $('#admin-nav').hidden = !canManageAccess();
 }
 
 async function authSubmit(path, form) {
@@ -132,6 +135,7 @@ function render() {
   $('#todos-completed').innerHTML = doneTodos.map(todoHtml).join('') || empty('完成的事项会出现在这里');
   $('#active-count').textContent = `${activeTodos.length} 项`;
   renderNetdisk();
+  renderAdmin();
 }
 
 function renderNetdisk() {
@@ -173,6 +177,54 @@ function renderNetdisk() {
     ].join('') : '';
   }
   results.innerHTML = visible.map(netdiskResultHtml).join('') || empty(selected === '全部' ? '没有搜到结果，换个关键词试试' : '这个网盘类型下没有结果');
+}
+
+async function loadAdmin() {
+  if (!canManageAccess()) return;
+  state.admin.loading = true;
+  renderAdmin();
+  try {
+    const [users, roles, permissions] = await Promise.all([
+      request('/api/admin/users'),
+      request('/api/admin/roles'),
+      request('/api/admin/permissions')
+    ]);
+    state.admin = { users, roles, permissions, loading: false };
+  } catch (error) {
+    state.admin.loading = false;
+    toast(error.message);
+  }
+  renderAdmin();
+}
+
+function renderAdmin() {
+  const users = $('#admin-users');
+  const roles = $('#admin-roles');
+  if (!users || !roles) return;
+  if (!canManageAccess()) {
+    users.innerHTML = empty('没有访问用户管理的权限');
+    roles.innerHTML = '';
+    return;
+  }
+  if (state.admin.loading) {
+    users.innerHTML = empty('正在加载用户…');
+    roles.innerHTML = empty('正在加载角色…');
+    return;
+  }
+  users.innerHTML = state.admin.users.map((user) => {
+    const checks = state.admin.roles.map((role) => `<label class="role-check"><input type="checkbox" data-user-role value="${escapeHtml(role.name)}" ${user.roles.includes(role.name) ? 'checked' : ''}>${escapeHtml(role.name)}</label>`).join('');
+    const permissionText = user.permissions.map((permission) => rolePermissionLabel(permission)).join(' · ');
+    return `<article class="admin-user" data-role-user="${escapeHtml(user.id)}"><div><strong>${escapeHtml(user.username)}</strong><small>${escapeHtml(user.isAdmin ? '管理员' : '普通用户')} · ${escapeHtml(user.lastLoginAt || '尚未登录')}</small><p>${escapeHtml(permissionText)}</p></div><div class="role-checks">${checks}</div></article>`;
+  }).join('') || empty('还没有用户');
+  roles.innerHTML = state.admin.roles.map((role) => {
+    const permissions = role.permissions.map((permission) => `<span>${escapeHtml(rolePermissionLabel(permission))}</span>`).join('');
+    return `<article class="admin-role"><div><strong>${escapeHtml(role.name)}</strong><small>${escapeHtml(role.description)}</small></div><div class="permission-tags">${permissions}</div></article>`;
+  }).join('') || empty('还没有角色');
+}
+
+function rolePermissionLabel(permission) {
+  const found = state.admin.permissions.find((item) => item.name === permission);
+  return found ? found.description : permission;
 }
 
 function renderPlanStatistics() {
@@ -283,6 +335,25 @@ $('#item-form').addEventListener('submit', async (event) => {
   await mutate(()=>request(`/api/${type}`,{method:'POST',body:JSON.stringify(payload)}),'已添加'); closeModal();
 });
 document.addEventListener('change', async (event) => {
+  const roleInput = event.target.closest('[data-user-role]');
+  if (roleInput) {
+    const row = roleInput.closest('[data-role-user]');
+    const roles = $$('[data-user-role]', row).filter((input) => input.checked).map((input) => input.value);
+    try {
+      const updated = await request(`/api/admin/users/${row.dataset.roleUser}/roles`, { method:'PATCH', body:JSON.stringify({ roles }) });
+      state.admin.users = state.admin.users.map((user) => user.id === updated.id ? updated : user);
+      if (state.user?.id === updated.id) {
+        state.user = await request('/api/auth/me');
+        showApp();
+      }
+      renderAdmin();
+      toast('角色已更新');
+    } catch (error) {
+      await loadAdmin();
+      toast(error.message);
+    }
+    return;
+  }
   const picker = event.target.closest('[data-move-bookmark]');
   if (!picker) return;
   await mutate(() => request(`/api/bookmarks/${picker.dataset.moveBookmark}`, { method:'PATCH', body:JSON.stringify({ category:picker.value }) }), `已移动到「${picker.value}」`);
@@ -311,7 +382,7 @@ $('#netdisk-form').addEventListener('submit', async (event) => {
 document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape')closeModal(); });
 window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));
 async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
-function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');}
+function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();}
 
 async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;

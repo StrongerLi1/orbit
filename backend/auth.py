@@ -20,6 +20,25 @@ REFRESH_COOKIE = "orbit_refresh"
 OLD_SESSION_COOKIE = "orbit_session"
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
 
+PERMISSIONS = {
+    "content:read": "读取共享业务数据",
+    "content:write": "新增、修改和删除共享业务数据",
+    "netdisk:search": "使用网盘搜索",
+    "users:manage": "管理用户和用户角色",
+    "roles:manage": "查看角色和权限",
+}
+
+ROLES = {
+    "admin": {
+        "description": "管理员，拥有全部权限",
+        "permissions": tuple(PERMISSIONS.keys()),
+    },
+    "user": {
+        "description": "普通用户，可使用共享业务功能",
+        "permissions": ("content:read", "content:write", "netdisk:search"),
+    },
+}
+
 
 def validate_credentials_input(username: str, password: str) -> tuple[str, str]:
     username = (username or "").strip()
@@ -50,11 +69,18 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
+def _ordered(values: set[str], order: list[str] | tuple[str, ...]) -> list[str]:
+    return [value for value in order if value in values]
+
+
 def public_user(row: dict[str, Any]) -> dict[str, Any]:
+    roles, permissions = user_access(row)
     return {
         "id": row["id"],
         "username": row["username"],
-        "isAdmin": bool(row["is_admin"]),
+        "isAdmin": "admin" in roles or bool(row["is_admin"]),
+        "roles": roles,
+        "permissions": permissions,
         "createdAt": row["created_at"],
         "lastLoginAt": row.get("last_login_at") or "",
     }
@@ -74,6 +100,103 @@ def get_user_by_id(user_id: str) -> dict[str, Any] | None:
             return cursor.fetchone()
 
 
+def user_access(row: dict[str, Any]) -> tuple[list[str], list[str]]:
+    if isinstance(row.get("roles"), list) and isinstance(row.get("permissions"), list):
+        return row["roles"], row["permissions"]
+
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT r.name AS role_name, p.name AS permission_name
+                FROM user_roles ur
+                JOIN roles r ON r.id = ur.role_id
+                LEFT JOIN role_permissions rp ON rp.role_id = r.id
+                LEFT JOIN permissions p ON p.id = rp.permission_id
+                WHERE ur.user_id = %s
+                """,
+                (row["id"],),
+            )
+            rows = cursor.fetchall()
+
+    roles = {item["role_name"] for item in rows if item.get("role_name")}
+    permissions = {item["permission_name"] for item in rows if item.get("permission_name")}
+    if bool(row.get("is_admin")):
+        roles.add("admin")
+        permissions.update(ROLES["admin"]["permissions"])
+    if not roles:
+        roles.add("user")
+        permissions.update(ROLES["user"]["permissions"])
+    return _ordered(roles, tuple(ROLES.keys())), _ordered(permissions, tuple(PERMISSIONS.keys()))
+
+
+def attach_user_access(row: dict[str, Any]) -> dict[str, Any]:
+    roles, permissions = user_access(row)
+    return {**row, "roles": roles, "permissions": permissions}
+
+
+def list_permissions() -> list[dict[str, str]]:
+    return [{"name": name, "description": description} for name, description in PERMISSIONS.items()]
+
+
+def list_roles() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": name,
+            "description": details["description"],
+            "permissions": list(details["permissions"]),
+        }
+        for name, details in ROLES.items()
+    ]
+
+
+def list_users() -> list[dict[str, Any]]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
+            return [public_user(user) for user in cursor.fetchall()]
+
+
+def set_user_roles(user_id: str, roles: list[str]) -> dict[str, Any]:
+    wanted = list(dict.fromkeys(str(role or "").strip() for role in roles))
+    wanted = [role for role in wanted if role]
+    if not wanted:
+        raise HTTPException(status_code=422, detail="用户至少需要一个角色")
+    unknown = [role for role in wanted if role not in ROLES]
+    if unknown:
+        raise HTTPException(status_code=422, detail="包含未知角色")
+
+    user = get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    current_roles, _ = user_access(user)
+    if "admin" in current_roles and "admin" not in wanted and count_admin_users() <= 1:
+        raise HTTPException(status_code=409, detail="不能移除最后一个管理员")
+
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
+            for role in wanted:
+                cursor.execute("INSERT INTO user_roles (user_id, role_id) VALUES (%s, %s)", (user_id, role))
+            cursor.execute("UPDATE users SET is_admin = %s WHERE id = %s", (1 if "admin" in wanted else 0, user_id))
+    return public_user(get_user_by_id(user_id))
+
+
+def count_admin_users() -> int:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(DISTINCT u.id) AS count
+                FROM users u
+                LEFT JOIN user_roles ur ON ur.user_id = u.id AND ur.role_id = 'admin'
+                WHERE u.is_admin = 1 OR ur.role_id IS NOT NULL
+                """
+            )
+            return int(cursor.fetchone()["count"])
+
+
 def create_user(username: str, password: str, is_admin: bool = False) -> dict[str, Any]:
     username, password = validate_credentials_input(username, password)
     if get_user_by_username(username):
@@ -85,6 +208,7 @@ def create_user(username: str, password: str, is_admin: bool = False) -> dict[st
                 "INSERT INTO users (id, username, password_hash, is_admin, created_at, last_login_at) VALUES (%s, %s, %s, %s, %s, %s)",
                 (user_id, username, hash_password(password), 1 if is_admin else 0, now_iso(), ""),
             )
+    set_user_roles(user_id, ["admin" if is_admin else "user"])
     return get_user_by_id(user_id)
 
 
@@ -166,10 +290,13 @@ def set_auth_cookies(response: Response, user: dict[str, Any]) -> None:
     access_seconds = settings.jwt_access_minutes * 60
     refresh_seconds = settings.jwt_refresh_days * 24 * 60 * 60
     refresh_jti = str(uuid.uuid4())
+    public = public_user(user)
     base_payload = {
         "sub": user["id"],
         "username": user["username"],
-        "isAdmin": bool(user["is_admin"]),
+        "isAdmin": public["isAdmin"],
+        "roles": public["roles"],
+        "permissions": public["permissions"],
     }
     access_token = _jwt_encode({**base_payload, "typ": "access"}, access_seconds)
     refresh_token = _jwt_encode({**base_payload, "typ": "refresh", "jti": refresh_jti}, refresh_seconds)
@@ -200,6 +327,13 @@ def require_user(request: Request) -> dict[str, Any]:
     user = get_user_by_id(str(payload.get("sub", "")))
     if not user:
         raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
+    return attach_user_access(user)
+
+
+def require_permission(request: Request, permission: str) -> dict[str, Any]:
+    user = require_user(request)
+    if permission not in user["permissions"]:
+        raise HTTPException(status_code=403, detail="没有权限执行此操作")
     return user
 
 
@@ -226,5 +360,42 @@ def seed_admin_user() -> None:
         with connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("UPDATE users SET is_admin = 1 WHERE id = %s", (existing["id"],))
+        set_user_roles(existing["id"], ["admin"])
         return
     create_user(settings.admin_username, settings.admin_password, is_admin=True)
+
+
+def seed_rbac_defaults() -> None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            for name, description in PERMISSIONS.items():
+                cursor.execute(
+                    "INSERT INTO permissions (id, name, description) VALUES (%s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)",
+                    (name, name, description),
+                )
+            for name, details in ROLES.items():
+                cursor.execute(
+                    "INSERT INTO roles (id, name, description) VALUES (%s, %s, %s) "
+                    "ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)",
+                    (name, name, details["description"]),
+                )
+                cursor.execute("DELETE FROM role_permissions WHERE role_id = %s", (name,))
+                for permission in details["permissions"]:
+                    cursor.execute(
+                        "INSERT INTO role_permissions (role_id, permission_id) VALUES (%s, %s)",
+                        (name, permission),
+                    )
+            cursor.execute(
+                "INSERT IGNORE INTO user_roles (user_id, role_id) "
+                "SELECT id, 'admin' FROM users WHERE is_admin = 1"
+            )
+            cursor.execute(
+                """
+                INSERT IGNORE INTO user_roles (user_id, role_id)
+                SELECT u.id, 'user'
+                FROM users u
+                LEFT JOIN user_roles ur ON ur.user_id = u.id
+                WHERE ur.user_id IS NULL
+                """
+            )

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "uvicorn backend.main:app --host 0.0.0.0 --port 3000 --reload",
     "start": "python3 run.py",
-    "test": "python3 -m compileall backend run.py"
+    "test": "python3 -m compileall backend run.py tests && python3 tests/test_rbac.py"
   },
   "engines": {
     "node": ">=20"

@@ -157,10 +157,49 @@ def initialize_database() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS roles (
+                    id VARCHAR(64) PRIMARY KEY,
+                    name VARCHAR(64) NOT NULL UNIQUE,
+                    description VARCHAR(255) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS permissions (
+                    id VARCHAR(80) PRIMARY KEY,
+                    name VARCHAR(80) NOT NULL UNIQUE,
+                    description VARCHAR(255) NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS role_permissions (
+                    role_id VARCHAR(64) NOT NULL,
+                    permission_id VARCHAR(80) NOT NULL,
+                    PRIMARY KEY (role_id, permission_id),
+                    INDEX idx_role_permissions_permission (permission_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_roles (
+                    user_id VARCHAR(64) NOT NULL,
+                    role_id VARCHAR(64) NOT NULL,
+                    PRIMARY KEY (user_id, role_id),
+                    INDEX idx_user_roles_role (role_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
 
     if settings.migrate_from_json:
         migrate_from_json_if_empty(DATA_FILE)
-    from .auth import seed_admin_user
+    from .auth import seed_admin_user, seed_rbac_defaults
+    seed_rbac_defaults()
     seed_admin_user()
 
 

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260703-auth">
+  <link rel="stylesheet" href="/styles.css?v=20260704-rbac">
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -43,6 +43,7 @@
         <a class="nav-link" href="#excerpts" data-page="excerpts"><span>“</span>摘录</a>
         <a class="nav-link" href="#plans" data-page="plans"><span>◷</span>日常计划</a>
         <a class="nav-link" href="#todos" data-page="todos"><span>✓</span>待办事项</a>
+        <a class="nav-link" href="#admin" data-page="admin" id="admin-nav" hidden><span>⚙</span>用户管理</a>
       </nav>
       <div class="sidebar-bottom">
         <div class="quote">“把生活过成<br>自己喜欢的样子。”</div>
@@ -128,6 +129,20 @@
           <div class="page-title"><div><p class="eyebrow">GET THINGS DONE</p><h1>待办事项</h1><p>一次做好一件事，其他的先交给这里。</p></div><button class="primary" data-add="todos">＋ 添加待办</button></div>
           <div class="todo-board"><div class="card"><div class="card-head"><h2>进行中</h2><span id="active-count" class="count"></span></div><div id="todos-active" class="todo-list large"></div></div><div class="card"><div class="card-head"><h2>已完成</h2><button class="text-btn" id="clear-completed">清空</button></div><div id="todos-completed" class="todo-list large"></div></div></div>
         </section>
+
+        <section class="page" id="admin">
+          <div class="page-title"><div><p class="eyebrow">ACCESS CONTROL</p><h1>用户管理</h1><p>查看固定角色与权限，为用户分配 admin 或 user 角色。</p></div></div>
+          <div class="admin-layout">
+            <section class="card">
+              <div class="card-head"><div><span class="label">USERS</span><h2>账号角色</h2></div></div>
+              <div id="admin-users" class="admin-users"></div>
+            </section>
+            <section class="card">
+              <div class="card-head"><div><span class="label">ROLES</span><h2>固定角色</h2></div></div>
+              <div id="admin-roles" class="admin-roles"></div>
+            </section>
+          </div>
+        </section>
       </div>
     </main>
   </div>
@@ -137,6 +152,6 @@
   </div>
   <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
   <div id="toast" class="toast"></div>
-  <script src="/app.js?v=20260703-jwt-redis"></script>
+  <script src="/app.js?v=20260704-rbac"></script>
 </body>
 </html>

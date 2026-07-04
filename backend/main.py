@@ -14,11 +14,16 @@ from .auth import (
     clear_auth_cookies,
     create_user,
     get_user_by_username,
+    list_permissions,
+    list_roles,
+    list_users,
     public_user,
+    require_permission,
     refresh_user,
     require_user,
     revoke_refresh_token,
     set_auth_cookies,
+    set_user_roles,
     touch_login,
     validate_credentials_input,
     verify_password,
@@ -235,7 +240,7 @@ def auth_logout(request: Request, response: Response):
 
 @app.get("/api/netdisk/search")
 def netdisk_search(request: Request, kw: str = "", page: int = 1):
-    require_user(request)
+    require_permission(request, "netdisk:search")
     keyword = kw.strip()
     if not keyword:
         raise HTTPException(status_code=422, detail="请输入搜索关键词")
@@ -277,9 +282,35 @@ def netdisk_search(request: Request, kw: str = "", page: int = 1):
     }
 
 
+@app.get("/api/admin/users")
+def admin_users(request: Request):
+    require_permission(request, "users:manage")
+    return list_users()
+
+
+@app.patch("/api/admin/users/{user_id}/roles")
+async def admin_update_user_roles(user_id: str, request: Request):
+    require_permission(request, "users:manage")
+    data = await request.json()
+    roles = data.get("roles") if isinstance(data.get("roles"), list) else []
+    return set_user_roles(user_id, roles)
+
+
+@app.get("/api/admin/roles")
+def admin_roles(request: Request):
+    require_permission(request, "roles:manage")
+    return list_roles()
+
+
+@app.get("/api/admin/permissions")
+def admin_permissions(request: Request):
+    require_permission(request, "roles:manage")
+    return list_permissions()
+
+
 @app.get("/api/{collection}")
 def api_list(collection: str, request: Request):
-    require_user(request)
+    require_permission(request, "content:read")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     return list_items(collection)
@@ -287,7 +318,7 @@ def api_list(collection: str, request: Request):
 
 @app.post("/api/{collection}", status_code=201)
 async def api_create(collection: str, request: Request):
-    require_user(request)
+    require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     valid = validate(collection, await request.json())
@@ -298,7 +329,7 @@ async def api_create(collection: str, request: Request):
 
 @app.patch("/api/{collection}/{item_id}")
 async def api_update(collection: str, item_id: str, request: Request):
-    require_user(request)
+    require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     existing = get_item(collection, item_id)
@@ -310,7 +341,7 @@ async def api_update(collection: str, item_id: str, request: Request):
 
 @app.delete("/api/{collection}/{item_id}")
 def api_delete(collection: str, item_id: str, request: Request):
-    require_user(request)
+    require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     existing = get_item(collection, item_id)
