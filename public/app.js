@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], loading: false }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -9,6 +9,7 @@ const netdiskSourceLabels = { baidu: '百度网盘', quark: '夸克网盘', aliy
 const hasPermission = (permission) => state.user?.permissions?.includes(permission);
 const canManageAccess = () => hasPermission('users:manage') || hasPermission('roles:manage');
 const canManageFolders = () => hasPermission('folders:manage');
+const canManageAgents = () => hasPermission('agents:manage');
 
 function isPlanActive(plan, date) { return date >= plan.startDate && (!plan.endDate || date <= plan.endDate); }
 function plansForDate(date) { return state.plans.filter((plan) => isPlanActive(plan, date)); }
@@ -79,6 +80,7 @@ function showApp() {
   $('.app-shell').hidden = false;
   $('#user-chip').textContent = state.user ? `${state.user.username}${state.user.isAdmin ? ' · 管理员' : ''}` : '';
   $('#admin-nav').hidden = !canManageAccess();
+  $('#hermes-nav').hidden = !canManageAgents();
 }
 
 async function authSubmit(path, form) {
@@ -184,7 +186,48 @@ function render() {
   $('#todos-completed').innerHTML = doneTodos.map(todoHtml).join('') || empty('完成的事项会出现在这里');
   $('#active-count').textContent = `${activeTodos.length} 项`;
   renderNetdisk();
+  renderHermes();
   renderAdmin();
+}
+
+function renderHermes() {
+  const status = $('#hermes-status');
+  const badge = $('#hermes-badge');
+  const open = $('#hermes-open');
+  if (!status || !badge || !open) return;
+  const localUrl = state.hermes.dashboardUrl || 'http://127.0.0.1:9119';
+  const url = state.hermes.dashboardPublicUrl || localUrl;
+  const canOpen = canOpenHermesDashboard(url);
+  open.href = url;
+  open.textContent = canOpen ? '打开 Dashboard' : '服务器本机 Dashboard';
+  open.classList.toggle('disabled', !state.hermes.running || !canOpen);
+  if (state.hermes.loading) {
+    badge.textContent = '检查中';
+    badge.className = 'hermes-badge';
+    status.innerHTML = '<div class="empty"><span class="loading-dot"></span> 正在检查 Hermes...</div>';
+    return;
+  }
+  const tone = !state.hermes.installed || !state.hermes.configured ? 'missing' : state.hermes.running ? 'running' : 'stopped';
+  badge.className = `hermes-badge ${tone}`;
+  badge.textContent = tone === 'running' ? '运行中' : tone === 'missing' ? '不可用' : '未运行';
+  status.innerHTML = `<dl class="hermes-grid">
+    <div><dt>Dashboard</dt><dd>${escapeHtml(url)}</dd></div>
+    <div><dt>Hermes CLI</dt><dd>${state.hermes.installed ? '已安装' : '未找到'}</dd></div>
+    <div><dt>配置</dt><dd>${state.hermes.configured ? '已配置' : '缺失'}</dd></div>
+    <div><dt>状态</dt><dd>${escapeHtml(state.hermes.message || '尚未检查')}</dd></div>
+  </dl>${state.hermes.details ? `<p class="hermes-details">${escapeHtml(state.hermes.details)}</p>` : ''}`;
+}
+
+function canOpenHermesDashboard(url) {
+  try {
+    if (url.startsWith('/')) return true;
+    const dashboardHost = new URL(url).hostname;
+    const pageHost = location.hostname;
+    const loopback = new Set(['127.0.0.1', 'localhost', '::1']);
+    return !loopback.has(dashboardHost) || loopback.has(pageHost);
+  } catch {
+    return false;
+  }
 }
 
 function renderNetdisk() {
@@ -244,6 +287,18 @@ async function loadAdmin() {
     toast(error.message);
   }
   renderAdmin();
+}
+
+async function loadHermes() {
+  if (!canManageAgents()) return;
+  state.hermes.loading = true;
+  renderHermes();
+  try {
+    state.hermes = { ...state.hermes, ...await request('/api/agents/hermes/status'), loading: false };
+  } catch (error) {
+    state.hermes = { ...state.hermes, loading: false, running: false, message: error.message };
+  }
+  renderHermes();
 }
 
 function renderAdmin() {
@@ -414,6 +469,23 @@ document.addEventListener('click', async (event) => {
   if (event.target.closest('[data-action="quick-add"]')) { const rect=event.target.closest('button').getBoundingClientRect(); const menu=$('#quick-menu'); menu.style.top=`${rect.bottom+8}px`; menu.style.left=`${Math.min(rect.left,innerWidth-180)}px`; menu.hidden=!menu.hidden; }
   const netdiskSource = event.target.closest('[data-netdisk-source]');
   if (netdiskSource) { state.netdisk.selectedSource = netdiskSource.dataset.netdiskSource; renderNetdisk(); }
+  const hermesAction = event.target.closest('[data-hermes-action]');
+  if (hermesAction) {
+    const action = hermesAction.dataset.hermesAction;
+    if (action === 'refresh') await loadHermes();
+    if (action === 'start' || action === 'stop') {
+      state.hermes.loading = true;
+      renderHermes();
+      try {
+        state.hermes = { ...state.hermes, ...await request(`/api/agents/hermes/${action}`, { method:'POST' }), loading: false };
+        toast(action === 'start' ? 'Hermes 启动命令已发送' : 'Hermes 停止命令已发送');
+      } catch (error) {
+        state.hermes = { ...state.hermes, loading: false, running: false, message: error.message };
+        toast(error.message);
+      }
+      renderHermes();
+    }
+  }
   if (event.target.closest('.mobile-menu')) $('.sidebar').classList.toggle('open');
   const shift = event.target.closest('[data-shift-date]'); if (shift) { state.planDate = shiftDate(state.planDate, Number(shift.dataset.shiftDate)); render(); }
   if (event.target.closest('[data-plan-today]')) { state.planDate = dateKey(); render(); }
@@ -524,7 +596,7 @@ async function saveFolderOrder(draggedId, targetId) {
     toast(error.message);
   }
 }
-function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();}
+function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}if(id==='hermes'&&!canManageAgents()){id='dashboard';toast('没有访问智能体管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();if(id==='hermes')loadHermes();}
 
 async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;

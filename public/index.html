@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260704-mobile-captcha">
+  <link rel="stylesheet" href="/styles.css?v=20260706-hermes-proxy">
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -43,6 +43,7 @@
         <a class="nav-link" href="#excerpts" data-page="excerpts"><span>“</span>摘录</a>
         <a class="nav-link" href="#plans" data-page="plans"><span>◷</span>日常计划</a>
         <a class="nav-link" href="#todos" data-page="todos"><span>✓</span>待办事项</a>
+        <a class="nav-link" href="#hermes" data-page="hermes" id="hermes-nav" hidden><span>☤</span>Hermes</a>
         <a class="nav-link" href="#admin" data-page="admin" id="admin-nav" hidden><span>⚙</span>用户管理</a>
       </nav>
       <div class="sidebar-bottom">
@@ -143,6 +144,29 @@
             </section>
           </div>
         </section>
+
+        <section class="page" id="hermes">
+          <div class="page-title"><div><p class="eyebrow">LOCAL AGENT</p><h1>Hermes Agent</h1><p>管理服务器 Hermes dashboard，并从这里打开它的控制台。</p></div><button class="secondary" data-hermes-action="refresh">刷新状态</button></div>
+          <div class="hermes-layout">
+            <section class="card hermes-status-card">
+              <div class="card-head"><div><span class="label">STATUS</span><h2>本地服务</h2></div><span id="hermes-badge" class="hermes-badge">检查中</span></div>
+              <div id="hermes-status" class="hermes-status"></div>
+              <div class="hermes-actions">
+                <button class="primary" data-hermes-action="start">启动</button>
+                <button class="secondary" data-hermes-action="stop">停止</button>
+                <a id="hermes-open" class="secondary hermes-open" href="http://127.0.0.1:9119" target="_blank" rel="noreferrer">打开 Dashboard</a>
+              </div>
+            </section>
+            <section class="card">
+              <div class="card-head"><div><span class="label">LOCAL ONLY</span><h2>运行边界</h2></div></div>
+              <div class="hermes-notes">
+                <p>Orbit 只负责本地启动、停止和状态检查。</p>
+                <p>模型、API keys、会话和聊天都在 Hermes dashboard 内管理。</p>
+                <p>默认地址保持在 127.0.0.1，避免把敏感控制台暴露到公网。</p>
+              </div>
+            </section>
+          </div>
+        </section>
       </div>
     </main>
   </div>
@@ -161,6 +185,6 @@
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20260704-folder-manage"></script>
+  <script src="/app.js?v=20260706-hermes-proxy"></script>
 </body>
 </html>

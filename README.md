@@ -29,6 +29,8 @@ export MYSQL_USER=orbit
 export MYSQL_PASSWORD=orbit_password
 export MYSQL_DATABASE=orbit
 export PANSOU_BASE_URL=http://127.0.0.1:8888
+export HERMES_DASHBOARD_URL=http://127.0.0.1:9119
+export HERMES_DASHBOARD_PUBLIC_PATH=/hermes-dashboard
 export SESSION_SECRET=change-me-to-a-long-random-string
 export JWT_SECRET=change-me-to-a-long-random-string
 export REDIS_HOST=127.0.0.1
@@ -71,6 +73,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/folders`，`PATCH/DELETE /api/folders/:id`
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
+- `GET /api/agents/hermes/status`，`POST /api/agents/hermes/start`，`POST /api/agents/hermes/stop`，管理员管理本地 Hermes Agent dashboard
 - `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/refresh`，`POST /api/auth/logout`，`GET /api/auth/me`
 - `GET /api/admin/users`，`PATCH /api/admin/users/:id/roles`，`PATCH /api/admin/users/:id/ban`，`DELETE /api/admin/users/:id`
 - `GET /api/admin/roles`，`GET /api/admin/permissions`
@@ -78,6 +81,22 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 ## 网盘搜索
 
 网盘搜索模块接入 [PanSou](https://github.com/fish2018/pansou) 的 `/api/search?kw=` 接口。推荐在服务器本机运行 PanSou 后端，并把 `PANSOU_BASE_URL` 指向 `http://127.0.0.1:8888`。
+
+## Hermes Agent
+
+管理员可以在 Orbit 中查看并管理服务器本机 [Hermes Agent](https://github.com/NousResearch/hermes-agent) dashboard。Orbit 负责启动、停止、状态检查，并通过管理员登录态保护的代理入口打开 dashboard；模型、密钥、会话和聊天仍在 Hermes 自己的 dashboard 内管理。
+
+默认使用 `HERMES_DASHBOARD_URL=http://127.0.0.1:9119` 和 `HERMES_DASHBOARD_PUBLIC_PATH=/hermes-dashboard`，启动命令为 `hermes dashboard --host 127.0.0.1 --port 9119 --no-open`。如果本机还没安装 Hermes，先按 Hermes 官方安装方式安装并完成配置。
+
+生产环境中 Orbit 通过 systemd 运行时，可以把 Hermes 绑定到服务器本机端口，并让管理员通过 Orbit 的 `/hermes-dashboard/` 代理入口访问。当前服务器使用的 drop-in 形态如下：
+
+```ini
+[Service]
+Environment=HERMES_DASHBOARD_URL=http://127.0.0.1:9119
+Environment="HERMES_DASHBOARD_COMMAND=env HOME=/opt/orbit HERMES_HOME=/opt/orbit/.hermes /usr/local/bin/hermes dashboard --host 127.0.0.1 --port 9119 --no-open --skip-build"
+Environment="HERMES_DASHBOARD_STOP_COMMAND=env HOME=/opt/orbit HERMES_HOME=/opt/orbit/.hermes /usr/local/bin/hermes dashboard --stop"
+Environment=HERMES_DASHBOARD_TIMEOUT=5
+```
 
 ## 后续适合扩展
 
