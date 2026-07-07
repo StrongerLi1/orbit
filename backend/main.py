@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import json
 import re
@@ -11,9 +12,11 @@ import urllib.request
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Request, Response
+import websockets
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketDisconnect
 
 from .auth import (
     clear_auth_cookies,
@@ -302,6 +305,34 @@ def _response_headers(headers: Any) -> dict[str, str]:
     return {key: value for key, value in headers.items() if key.lower() not in blocked}
 
 
+def _hermes_ws_target(query: str) -> str:
+    base = settings.hermes_dashboard_url.rstrip("/")
+    if base.startswith("https://"):
+        target = "wss://" + base[len("https://"):]
+    elif base.startswith("http://"):
+        target = "ws://" + base[len("http://"):]
+    else:
+        target = base
+    target += "/ws"
+    if query:
+        target += "?" + query
+    return target
+
+
+def _hermes_ws_target_for_path(path: str, query: str) -> str:
+    base = settings.hermes_dashboard_url.rstrip("/")
+    if base.startswith("https://"):
+        target = "wss://" + base[len("https://"):]
+    elif base.startswith("http://"):
+        target = "ws://" + base[len("http://"):]
+    else:
+        target = base
+    target += path if path.startswith("/") else f"/{path}"
+    if query:
+        target += "?" + query
+    return target
+
+
 def _rewrite_hermes_html(raw: bytes) -> bytes:
     public_path = settings.hermes_dashboard_public_path
     script = f"<script>window.__HERMES_BASE_PATH__ = {json.dumps(public_path)};</script>"
@@ -501,6 +532,142 @@ async def hermes_dashboard_proxy(request: Request, proxy_path: str = ""):
         headers.pop("content-length", None)
         headers["Cache-Control"] = "no-store"
     return Response(content=raw, status_code=status, headers=headers)
+
+
+@app.websocket("/hermes-dashboard/ws")
+async def hermes_dashboard_ws_proxy(websocket: WebSocket):
+    try:
+        require_permission(websocket, "agents:manage")  # type: ignore[arg-type]
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+
+    if not _hermes_status().get("running"):
+        await websocket.close(code=1013)
+        return
+
+    await websocket.accept()
+    target = _hermes_ws_target(websocket.url.query)
+    upstream_headers = []
+    if "user-agent" in websocket.headers:
+        upstream_headers.append(("user-agent", websocket.headers["user-agent"]))
+
+    try:
+        async with websockets.connect(
+            target,
+            additional_headers=upstream_headers,
+            open_timeout=settings.hermes_dashboard_timeout,
+            ping_interval=None,
+            max_size=None,
+        ) as upstream:
+            async def client_to_upstream() -> None:
+                while True:
+                    message = await websocket.receive()
+                    msg_type = message.get("type")
+                    if msg_type == "websocket.disconnect":
+                        break
+                    if message.get("text") is not None:
+                        await upstream.send(message["text"])
+                    elif message.get("bytes") is not None:
+                        await upstream.send(message["bytes"])
+
+            async def upstream_to_client() -> None:
+                while True:
+                    message = await upstream.recv()
+                    if isinstance(message, bytes):
+                        await websocket.send_bytes(message)
+                    else:
+                        await websocket.send_text(message)
+
+            tasks = [
+                asyncio.create_task(client_to_upstream()),
+                asyncio.create_task(upstream_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                task.result()
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        await websocket.close(code=1011)
+
+
+async def _proxy_hermes_websocket(websocket: WebSocket, upstream_path: str) -> None:
+    try:
+        require_permission(websocket, "agents:manage")  # type: ignore[arg-type]
+    except HTTPException:
+        await websocket.close(code=1008)
+        return
+
+    if not _hermes_status().get("running"):
+        await websocket.close(code=1013)
+        return
+
+    await websocket.accept()
+    target = _hermes_ws_target_for_path(upstream_path, websocket.url.query)
+    upstream_headers = []
+    if "user-agent" in websocket.headers:
+        upstream_headers.append(("user-agent", websocket.headers["user-agent"]))
+
+    try:
+        async with websockets.connect(
+            target,
+            additional_headers=upstream_headers,
+            open_timeout=settings.hermes_dashboard_timeout,
+            ping_interval=None,
+            max_size=None,
+        ) as upstream:
+            async def client_to_upstream() -> None:
+                while True:
+                    message = await websocket.receive()
+                    msg_type = message.get("type")
+                    if msg_type == "websocket.disconnect":
+                        break
+                    if message.get("text") is not None:
+                        await upstream.send(message["text"])
+                    elif message.get("bytes") is not None:
+                        await upstream.send(message["bytes"])
+
+            async def upstream_to_client() -> None:
+                while True:
+                    message = await upstream.recv()
+                    if isinstance(message, bytes):
+                        await websocket.send_bytes(message)
+                    else:
+                        await websocket.send_text(message)
+
+            tasks = [
+                asyncio.create_task(client_to_upstream()),
+                asyncio.create_task(upstream_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                task.result()
+    except WebSocketDisconnect:
+        return
+    except Exception:
+        await websocket.close(code=1011)
+
+
+@app.websocket("/hermes-dashboard/api/ws")
+async def hermes_dashboard_api_ws_proxy(websocket: WebSocket):
+    await _proxy_hermes_websocket(websocket, "/api/ws")
+
+
+@app.websocket("/hermes-dashboard/api/pty")
+async def hermes_dashboard_api_pty_proxy(websocket: WebSocket):
+    await _proxy_hermes_websocket(websocket, "/api/pty")
+
+
+@app.websocket("/hermes-dashboard/api/events")
+async def hermes_dashboard_api_events_proxy(websocket: WebSocket):
+    await _proxy_hermes_websocket(websocket, "/api/events")
 
 
 @app.get("/api/admin/users")
