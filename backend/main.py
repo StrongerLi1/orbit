@@ -255,6 +255,32 @@ def _hermes_chat_title(content: str) -> str:
     return (title[:30] + "…") if len(title) > 30 else title or "新的对话"
 
 
+def _hermes_chat_command(message: str, hermes_session_id: str = "") -> list[str]:
+    command = _hermes_chat_command_parts()
+    query_flags = {"-q", "--query"}
+    query_index = next((index for index, part in enumerate(command) if part in query_flags), -1)
+    if query_index >= 0 and query_index != len(command) - 1:
+        raise HTTPException(status_code=503, detail="HERMES_CHAT_COMMAND 请不要预填 query 内容")
+    if hermes_session_id:
+        insert_at = query_index if query_index >= 0 else len(command)
+        command[insert_at:insert_at] = ["--resume", hermes_session_id]
+    if query_index >= 0:
+        command.append(message)
+    else:
+        command.extend(["-q", message])
+    return command
+
+
+def _clean_hermes_chat_output(output: str) -> str:
+    lines = []
+    for line in (output or "").splitlines():
+        clean = line.strip()
+        if "tirith security scanner enabled but not available" in clean:
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def _run_hermes_chat(message: str, hermes_session_id: str = "") -> dict[str, str]:
     status = _hermes_status()
     if not status.get("running"):
@@ -264,10 +290,7 @@ def _run_hermes_chat(message: str, hermes_session_id: str = "") -> dict[str, str
     if not _command_available(parts):
         raise HTTPException(status_code=503, detail="Hermes CLI 未安装或不在 PATH 中")
 
-    command = [*parts]
-    if hermes_session_id:
-        command.extend(["--resume", hermes_session_id])
-    command.append(message)
+    command = _hermes_chat_command(message, hermes_session_id)
 
     try:
         result = subprocess.run(
@@ -283,7 +306,7 @@ def _run_hermes_chat(message: str, hermes_session_id: str = "") -> dict[str, str
     except OSError as error:
         raise HTTPException(status_code=503, detail=f"Hermes 聊天启动失败：{error}") from error
 
-    output = (result.stdout or "").strip()
+    output = _clean_hermes_chat_output(result.stdout or "")
     if result.returncode != 0:
         details = (result.stderr or output or f"exit code {result.returncode}").strip()
         raise HTTPException(status_code=502, detail=f"Hermes 聊天失败：{details[:500]}")
