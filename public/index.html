@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260706-hermes-proxy">
+  <link rel="stylesheet" href="/styles.css?v=20260708-hermes-chat">
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -43,7 +43,8 @@
         <a class="nav-link" href="#excerpts" data-page="excerpts"><span>“</span>摘录</a>
         <a class="nav-link" href="#plans" data-page="plans"><span>◷</span>日常计划</a>
         <a class="nav-link" href="#todos" data-page="todos"><span>✓</span>待办事项</a>
-        <a class="nav-link" href="#hermes" data-page="hermes" id="hermes-nav" hidden><span>☤</span>Hermes</a>
+        <a class="nav-link" href="#hermes-chat" data-page="hermes-chat" id="hermes-chat-nav" hidden><span>☤</span>Hermes 聊天</a>
+        <a class="nav-link" href="#hermes" data-page="hermes" id="hermes-nav" hidden><span>⚡</span>Hermes 管理</a>
         <a class="nav-link" href="#admin" data-page="admin" id="admin-nav" hidden><span>⚙</span>用户管理</a>
       </nav>
       <div class="sidebar-bottom">
@@ -115,6 +116,23 @@
           <div id="netdisk-results" class="netdisk-results"></div>
         </section>
 
+        <section class="page" id="hermes-chat">
+          <div class="page-title"><div><p class="eyebrow">HERMES CHAT</p><h1>Hermes 聊天</h1><p>和服务器上的 Hermes 对话，每个账号保存自己的多轮会话。</p></div><button class="primary" data-hermes-chat-new>＋ 新建对话</button></div>
+          <div class="hermes-chat-layout">
+            <aside class="card hermes-chat-sidebar">
+              <div class="card-head"><div><span class="label">SESSIONS</span><h2>会话</h2></div></div>
+              <div id="hermes-chat-conversations" class="hermes-chat-conversations"></div>
+            </aside>
+            <section class="card hermes-chat-room-card">
+              <div id="hermes-chat-room" class="hermes-chat-room"></div>
+              <form id="hermes-chat-form" class="hermes-chat-form">
+                <textarea id="hermes-chat-input" name="content" maxlength="8000" placeholder="输入消息，按发送等待 Hermes 回复…" required></textarea>
+                <button class="primary" type="submit">发送</button>
+              </form>
+            </section>
+          </div>
+        </section>
+
         <section class="page" id="plans">
           <div class="page-title"><div><p class="eyebrow">DAILY RHYTHM</p><h1>日常计划</h1><p>不是填满时间，而是找到自己的节奏。</p></div><button class="primary" data-add="plans">＋ 添加计划</button></div>
           <div class="plan-datebar"><button data-shift-date="-1" aria-label="前一天">‹</button><input id="plan-date" type="date" aria-label="计划日期"><button class="today-btn" data-plan-today>今天</button><button data-shift-date="1" aria-label="后一天">›</button></div>
@@ -143,6 +161,13 @@
               <div id="admin-roles" class="admin-roles"></div>
             </section>
           </div>
+          <section class="card admin-hermes-card">
+            <div class="card-head"><div><span class="label">HERMES CHAT</span><h2>聊天审计</h2></div></div>
+            <div class="admin-hermes-layout">
+              <div id="admin-hermes-chats" class="admin-hermes-chats"></div>
+              <div id="admin-hermes-chat-detail" class="admin-hermes-chat-detail"></div>
+            </div>
+          </section>
         </section>
 
         <section class="page" id="hermes">
@@ -185,6 +210,6 @@
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20260706-hermes-proxy"></script>
+  <script src="/app.js?v=20260708-hermes-chat"></script>
 </body>
 </html>

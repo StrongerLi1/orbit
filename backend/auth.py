@@ -26,6 +26,7 @@ PERMISSIONS = {
     "content:write": "新增、修改和删除共享业务数据",
     "netdisk:search": "使用网盘搜索",
     "folders:manage": "管理收藏夹标签",
+    "hermes:chat": "使用 Hermes 聊天",
     "agents:manage": "管理本地智能体服务",
     "users:manage": "管理用户和用户角色",
     "roles:manage": "查看角色和权限",
@@ -38,7 +39,7 @@ ROLES = {
     },
     "user": {
         "description": "普通用户，可使用共享业务功能",
-        "permissions": ("content:read", "content:write", "netdisk:search"),
+        "permissions": ("content:read", "content:write", "netdisk:search", "hermes:chat"),
     },
 }
 

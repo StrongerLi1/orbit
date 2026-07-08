@@ -3,8 +3,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from types import SimpleNamespace
+
 from backend.config import settings
-from backend.main import _hermes_status, _rewrite_hermes_css, _rewrite_hermes_html, _rewrite_hermes_javascript
+import backend.main as main_module
+from backend.main import (
+    _hermes_chat_title,
+    _hermes_status,
+    _parse_hermes_chat_session_id,
+    _rewrite_hermes_css,
+    _rewrite_hermes_html,
+    _rewrite_hermes_javascript,
+    _run_hermes_chat,
+)
 
 
 def main() -> None:
@@ -31,6 +42,39 @@ def main() -> None:
         assert script == b'let base="/hermes-dashboard";'
         css = _rewrite_hermes_css(b"@font-face{src:url(/assets/font.woff2)}")
         assert css == b"@font-face{src:url(/hermes-dashboard/assets/font.woff2)}"
+        assert _parse_hermes_chat_session_id("info\nsession_id: abc-123\n") == "abc-123"
+        assert _parse_hermes_chat_session_id("no session") == ""
+        assert _hermes_chat_title("  hello   Hermes  ") == "hello Hermes"
+        assert _hermes_chat_title("a" * 31) == ("a" * 30) + "…"
+        original_chat_command = settings.hermes_chat_command
+        original_chat_timeout = settings.hermes_chat_timeout
+        original_status = main_module._hermes_status
+        original_available = main_module._command_available
+        original_run = main_module.subprocess.run
+        captured = {}
+        try:
+            settings.hermes_chat_command = "hermes chat -Q -q"
+            settings.hermes_chat_timeout = 1
+            main_module._hermes_status = lambda: {"running": True}
+            main_module._command_available = lambda parts: True
+
+            def fake_run(command, **kwargs):
+                captured["command"] = command
+                captured["kwargs"] = kwargs
+                return SimpleNamespace(returncode=0, stdout="hello back\n", stderr="session_id: next-session\n")
+
+            main_module.subprocess.run = fake_run
+            reply = _run_hermes_chat("hi", "old-session")
+            assert reply == {"content": "hello back", "hermesSessionId": "next-session"}
+            assert captured["command"] == ["hermes", "chat", "-Q", "-q", "--resume", "old-session", "hi"]
+            assert captured["kwargs"]["stdin"] == main_module.subprocess.DEVNULL
+            assert captured["kwargs"]["timeout"] == 1
+        finally:
+            settings.hermes_chat_command = original_chat_command
+            settings.hermes_chat_timeout = original_chat_timeout
+            main_module._hermes_status = original_status
+            main_module._command_available = original_available
+            main_module.subprocess.run = original_run
     finally:
         settings.hermes_dashboard_command = original_command
         settings.hermes_dashboard_url = original_url

@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -10,6 +10,7 @@ const hasPermission = (permission) => state.user?.permissions?.includes(permissi
 const canManageAccess = () => hasPermission('users:manage') || hasPermission('roles:manage');
 const canManageFolders = () => hasPermission('folders:manage');
 const canManageAgents = () => hasPermission('agents:manage');
+const canUseHermesChat = () => hasPermission('hermes:chat');
 
 function isPlanActive(plan, date) { return date >= plan.startDate && (!plan.endDate || date <= plan.endDate); }
 function plansForDate(date) { return state.plans.filter((plan) => isPlanActive(plan, date)); }
@@ -80,6 +81,7 @@ function showApp() {
   $('.app-shell').hidden = false;
   $('#user-chip').textContent = state.user ? `${state.user.username}${state.user.isAdmin ? ' · 管理员' : ''}` : '';
   $('#admin-nav').hidden = !canManageAccess();
+  $('#hermes-chat-nav').hidden = !canUseHermesChat();
   $('#hermes-nav').hidden = !canManageAgents();
 }
 
@@ -186,6 +188,7 @@ function render() {
   $('#todos-completed').innerHTML = doneTodos.map(todoHtml).join('') || empty('完成的事项会出现在这里');
   $('#active-count').textContent = `${activeTodos.length} 项`;
   renderNetdisk();
+  renderHermesChat();
   renderHermes();
   renderAdmin();
 }
@@ -216,6 +219,42 @@ function renderHermes() {
     <div><dt>配置</dt><dd>${state.hermes.configured ? '已配置' : '缺失'}</dd></div>
     <div><dt>状态</dt><dd>${escapeHtml(state.hermes.message || '尚未检查')}</dd></div>
   </dl>${state.hermes.details ? `<p class="hermes-details">${escapeHtml(state.hermes.details)}</p>` : ''}`;
+}
+
+function renderHermesChat() {
+  const list = $('#hermes-chat-conversations');
+  const room = $('#hermes-chat-room');
+  const form = $('#hermes-chat-form');
+  const input = $('#hermes-chat-input');
+  if (!list || !room || !form || !input) return;
+  if (!canUseHermesChat()) {
+    list.innerHTML = empty('没有 Hermes 聊天权限');
+    room.innerHTML = empty('没有 Hermes 聊天权限');
+    form.hidden = true;
+    return;
+  }
+  form.hidden = false;
+  input.disabled = state.hermesChat.sending || !state.hermesChat.active;
+  form.querySelector('button').disabled = state.hermesChat.sending || !state.hermesChat.active;
+  form.querySelector('button').textContent = state.hermesChat.sending ? '等待中…' : '发送';
+  if (state.hermesChat.loading) {
+    list.innerHTML = empty('正在加载会话…');
+    room.innerHTML = '<div class="empty"><span class="loading-dot"></span> 正在加载 Hermes 聊天…</div>';
+    return;
+  }
+  if (state.hermesChat.error) {
+    room.innerHTML = `<div class="empty status-error">${escapeHtml(state.hermesChat.error)}</div>`;
+  }
+  list.innerHTML = state.hermesChat.conversations.map((conversation) => `<article class="hermes-chat-session ${conversation.id === state.hermesChat.activeId ? 'active' : ''}" data-hermes-chat-open="${escapeHtml(conversation.id)}"><div><strong>${escapeHtml(conversation.title)}</strong><small>${escapeHtml(conversation.updatedAt || conversation.createdAt)}</small></div><button class="delete" data-hermes-chat-delete="${escapeHtml(conversation.id)}" aria-label="删除会话">×</button></article>`).join('') || empty('还没有会话');
+  const active = state.hermesChat.active;
+  if (!active) {
+    room.innerHTML = empty('新建一个对话后开始聊天');
+    return;
+  }
+  const messages = active.messages || [];
+  room.innerHTML = messages.map((message) => `<article class="hermes-message ${message.role === 'user' ? 'user' : 'assistant'}"><div class="hermes-message-role">${message.role === 'user' ? '你' : 'Hermes'}</div><div class="hermes-message-content">${escapeHtml(message.content)}</div></article>`).join('') || empty('这条会话还没有消息');
+  if (state.hermesChat.sending) room.innerHTML += '<div class="empty"><span class="loading-dot"></span> Hermes 正在回复…</div>';
+  room.scrollTop = room.scrollHeight;
 }
 
 function canOpenHermesDashboard(url) {
@@ -276,12 +315,13 @@ async function loadAdmin() {
   state.admin.loading = true;
   renderAdmin();
   try {
-    const [users, roles, permissions] = await Promise.all([
+    const [users, roles, permissions, hermesChats] = await Promise.all([
       request('/api/admin/users'),
       request('/api/admin/roles'),
-      request('/api/admin/permissions')
+      request('/api/admin/permissions'),
+      request('/api/admin/hermes-chat/conversations')
     ]);
-    state.admin = { users, roles, permissions, loading: false };
+    state.admin = { ...state.admin, users, roles, permissions, hermesChats, loading: false };
   } catch (error) {
     state.admin.loading = false;
     toast(error.message);
@@ -301,18 +341,92 @@ async function loadHermes() {
   renderHermes();
 }
 
+async function loadHermesChat() {
+  if (!canUseHermesChat()) return;
+  state.hermesChat.loading = true;
+  state.hermesChat.error = '';
+  renderHermesChat();
+  try {
+    const conversations = await request('/api/hermes-chat/conversations');
+    const activeId = conversations.some((item) => item.id === state.hermesChat.activeId) ? state.hermesChat.activeId : conversations[0]?.id || '';
+    const active = activeId ? await request(`/api/hermes-chat/conversations/${activeId}`) : null;
+    state.hermesChat = { ...state.hermesChat, loading: false, conversations, activeId, active, error: '' };
+  } catch (error) {
+    state.hermesChat = { ...state.hermesChat, loading: false, error: error.message };
+    toast(error.message);
+  }
+  renderHermesChat();
+}
+
+async function loadHermesChatConversation(id) {
+  if (!canUseHermesChat() || !id) return;
+  state.hermesChat.loading = true;
+  state.hermesChat.activeId = id;
+  renderHermesChat();
+  try {
+    const active = await request(`/api/hermes-chat/conversations/${id}`);
+    state.hermesChat = { ...state.hermesChat, loading: false, active, activeId: id, error: '' };
+  } catch (error) {
+    state.hermesChat = { ...state.hermesChat, loading: false, error: error.message };
+    toast(error.message);
+  }
+  renderHermesChat();
+}
+
+async function createHermesChatConversation() {
+  if (!canUseHermesChat()) return;
+  try {
+    const conversation = await request('/api/hermes-chat/conversations', { method:'POST', body:JSON.stringify({}) });
+    state.hermesChat.conversations = [conversation, ...state.hermesChat.conversations];
+    state.hermesChat.activeId = conversation.id;
+    state.hermesChat.active = { ...conversation, messages: [] };
+    renderHermesChat();
+    $('#hermes-chat-input')?.focus();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function sendHermesChatMessage(content) {
+  const conversationId = state.hermesChat.activeId;
+  if (!conversationId || state.hermesChat.sending) return;
+  state.hermesChat.sending = true;
+  renderHermesChat();
+  try {
+    const result = await request(`/api/hermes-chat/conversations/${conversationId}/messages`, { method:'POST', body:JSON.stringify({ content }) });
+    const messages = [...(state.hermesChat.active?.messages || []), ...(result.messages || [])];
+    state.hermesChat.active = { ...(result.conversation || state.hermesChat.active), messages };
+    state.hermesChat.conversations = [
+      state.hermesChat.active,
+      ...state.hermesChat.conversations.filter((item) => item.id !== conversationId),
+    ];
+    state.hermesChat.error = '';
+  } catch (error) {
+    state.hermesChat.error = error.message;
+    toast(error.message);
+  }
+  state.hermesChat.sending = false;
+  renderHermesChat();
+}
+
 function renderAdmin() {
   const users = $('#admin-users');
   const roles = $('#admin-roles');
+  const hermesChats = $('#admin-hermes-chats');
+  const hermesDetail = $('#admin-hermes-chat-detail');
   if (!users || !roles) return;
   if (!canManageAccess()) {
     users.innerHTML = empty('没有访问用户管理的权限');
     roles.innerHTML = '';
+    if (hermesChats) hermesChats.innerHTML = '';
+    if (hermesDetail) hermesDetail.innerHTML = '';
     return;
   }
   if (state.admin.loading) {
     users.innerHTML = empty('正在加载用户…');
     roles.innerHTML = empty('正在加载角色…');
+    if (hermesChats) hermesChats.innerHTML = empty('正在加载 Hermes 会话…');
+    if (hermesDetail) hermesDetail.innerHTML = '';
     return;
   }
   users.innerHTML = state.admin.users.map((user) => {
@@ -327,6 +441,14 @@ function renderAdmin() {
     const permissions = role.permissions.map((permission) => `<span>${escapeHtml(rolePermissionLabel(permission))}</span>`).join('');
     return `<article class="admin-role"><div><strong>${escapeHtml(role.name)}</strong><small>${escapeHtml(role.description)}</small></div><div class="permission-tags">${permissions}</div></article>`;
   }).join('') || empty('还没有角色');
+  if (hermesChats) {
+    hermesChats.innerHTML = state.admin.hermesChats.map((conversation) => `<article class="admin-hermes-chat ${state.admin.hermesChatActive?.id === conversation.id ? 'active' : ''}" data-admin-hermes-open="${escapeHtml(conversation.id)}"><div><strong>${escapeHtml(conversation.title)}</strong><small>${escapeHtml(conversation.username || conversation.userId)} · ${escapeHtml(conversation.updatedAt)}</small></div><button class="delete-account" data-admin-hermes-delete="${escapeHtml(conversation.id)}">删除</button></article>`).join('') || empty('还没有 Hermes 聊天记录');
+  }
+  if (hermesDetail) {
+    const active = state.admin.hermesChatActive;
+    const messages = active?.messages || [];
+    hermesDetail.innerHTML = active ? `<div class="admin-hermes-title"><strong>${escapeHtml(active.title)}</strong><small>${escapeHtml(active.username || active.userId)} · ${escapeHtml(active.createdAt)}</small></div>${messages.map((message) => `<article class="hermes-message ${message.role === 'user' ? 'user' : 'assistant'}"><div class="hermes-message-role">${message.role === 'user' ? '用户' : 'Hermes'}</div><div class="hermes-message-content">${escapeHtml(message.content)}</div></article>`).join('') || empty('这条会话还没有消息')}` : empty('选择一条会话查看内容');
+  }
 }
 
 function rolePermissionLabel(permission) {
@@ -469,6 +591,61 @@ document.addEventListener('click', async (event) => {
   if (event.target.closest('[data-action="quick-add"]')) { const rect=event.target.closest('button').getBoundingClientRect(); const menu=$('#quick-menu'); menu.style.top=`${rect.bottom+8}px`; menu.style.left=`${Math.min(rect.left,innerWidth-180)}px`; menu.hidden=!menu.hidden; }
   const netdiskSource = event.target.closest('[data-netdisk-source]');
   if (netdiskSource) { state.netdisk.selectedSource = netdiskSource.dataset.netdiskSource; renderNetdisk(); }
+  if (event.target.closest('[data-hermes-chat-new]')) {
+    await createHermesChatConversation();
+    return;
+  }
+  const hermesChatDelete = event.target.closest('[data-hermes-chat-delete]');
+  if (hermesChatDelete) {
+    const id = hermesChatDelete.dataset.hermesChatDelete;
+    const conversation = state.hermesChat.conversations.find((item) => item.id === id);
+    if (!confirm(`确定删除会话「${conversation?.title || ''}」吗？`)) return;
+    try {
+      await request(`/api/hermes-chat/conversations/${id}`, { method:'DELETE' });
+      state.hermesChat.conversations = state.hermesChat.conversations.filter((item) => item.id !== id);
+      if (state.hermesChat.activeId === id) {
+        state.hermesChat.activeId = state.hermesChat.conversations[0]?.id || '';
+        state.hermesChat.active = null;
+        if (state.hermesChat.activeId) await loadHermesChatConversation(state.hermesChat.activeId);
+      }
+      renderHermesChat();
+      toast('会话已删除');
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  const hermesChatOpen = event.target.closest('[data-hermes-chat-open]');
+  if (hermesChatOpen) {
+    await loadHermesChatConversation(hermesChatOpen.dataset.hermesChatOpen);
+    return;
+  }
+  const adminHermesDelete = event.target.closest('[data-admin-hermes-delete]');
+  if (adminHermesDelete) {
+    const id = adminHermesDelete.dataset.adminHermesDelete;
+    const conversation = state.admin.hermesChats.find((item) => item.id === id);
+    if (!confirm(`确定删除「${conversation?.username || ''}」的会话「${conversation?.title || ''}」吗？`)) return;
+    try {
+      await request(`/api/admin/hermes-chat/conversations/${id}`, { method:'DELETE' });
+      state.admin.hermesChats = state.admin.hermesChats.filter((item) => item.id !== id);
+      if (state.admin.hermesChatActive?.id === id) state.admin.hermesChatActive = null;
+      renderAdmin();
+      toast('会话已删除');
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  const adminHermesOpen = event.target.closest('[data-admin-hermes-open]');
+  if (adminHermesOpen) {
+    try {
+      state.admin.hermesChatActive = await request(`/api/admin/hermes-chat/conversations/${adminHermesOpen.dataset.adminHermesOpen}`);
+      renderAdmin();
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
   const hermesAction = event.target.closest('[data-hermes-action]');
   if (hermesAction) {
     const action = hermesAction.dataset.hermesAction;
@@ -574,6 +751,14 @@ $('#netdisk-form').addEventListener('submit', async (event) => {
   }
   renderNetdisk();
 });
+$('#hermes-chat-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const input = $('#hermes-chat-input');
+  const content = input.value.trim();
+  if (!content) return;
+  input.value = '';
+  await sendHermesChatMessage(content);
+});
 document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape'){closeModal();closeAuthCaptcha();} });
 window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));
 async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
@@ -596,7 +781,7 @@ async function saveFolderOrder(draggedId, targetId) {
     toast(error.message);
   }
 }
-function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}if(id==='hermes'&&!canManageAgents()){id='dashboard';toast('没有访问智能体管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();if(id==='hermes')loadHermes();}
+function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}if(id==='hermes-chat'&&!canUseHermesChat()){id='dashboard';toast('没有 Hermes 聊天权限')}if(id==='hermes'&&!canManageAgents()){id='dashboard';toast('没有访问智能体管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();if(id==='hermes-chat')loadHermesChat();if(id==='hermes')loadHermes();}
 
 async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;

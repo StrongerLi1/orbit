@@ -157,6 +157,34 @@ def initialize_database() -> None:
             )
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS hermes_conversations (
+                    id VARCHAR(64) PRIMARY KEY,
+                    user_id VARCHAR(64) NOT NULL,
+                    title VARCHAR(160) NOT NULL,
+                    hermes_session_id VARCHAR(120) NOT NULL DEFAULT '',
+                    created_at VARCHAR(40) NOT NULL,
+                    updated_at VARCHAR(40) NOT NULL,
+                    deleted_at VARCHAR(40) NOT NULL DEFAULT '',
+                    INDEX idx_hermes_conversations_user (user_id, deleted_at, updated_at),
+                    INDEX idx_hermes_conversations_deleted (deleted_at, updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hermes_messages (
+                    id VARCHAR(64) PRIMARY KEY,
+                    conversation_id VARCHAR(64) NOT NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    role VARCHAR(20) NOT NULL,
+                    content MEDIUMTEXT NOT NULL,
+                    created_at VARCHAR(40) NOT NULL,
+                    INDEX idx_hermes_messages_conversation (conversation_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS users (
                     id VARCHAR(64) PRIMARY KEY,
                     username VARCHAR(64) NOT NULL UNIQUE,

@@ -48,8 +48,16 @@ from .repository import (
     delete_item,
     folder_exists,
     folder_has_bookmarks,
+    add_hermes_message,
+    create_hermes_conversation,
+    get_hermes_conversation,
     get_item,
+    list_admin_hermes_conversations,
+    list_hermes_conversations,
+    list_hermes_messages,
     list_items,
+    soft_delete_hermes_conversation,
+    update_hermes_conversation_after_message,
     update_item,
 )
 
@@ -228,6 +236,60 @@ def _command_available(parts: list[str]) -> bool:
         return False
     executable = Path(parts[0]).expanduser() if "/" in parts[0] else None
     return bool(executable and executable.exists()) or shutil.which(parts[0]) is not None
+
+
+def _hermes_chat_command_parts() -> list[str]:
+    try:
+        return shlex.split(settings.hermes_chat_command)
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail="Hermes 聊天命令配置无效，请检查 HERMES_CHAT_COMMAND") from error
+
+
+def _parse_hermes_chat_session_id(stderr: str) -> str:
+    match = re.search(r"session_id:\s*([^\s]+)", stderr or "")
+    return match.group(1) if match else ""
+
+
+def _hermes_chat_title(content: str) -> str:
+    title = " ".join(content.strip().split())
+    return (title[:30] + "…") if len(title) > 30 else title or "新的对话"
+
+
+def _run_hermes_chat(message: str, hermes_session_id: str = "") -> dict[str, str]:
+    status = _hermes_status()
+    if not status.get("running"):
+        raise HTTPException(status_code=503, detail="Hermes dashboard 尚未运行，请联系管理员启动")
+
+    parts = _hermes_chat_command_parts()
+    if not _command_available(parts):
+        raise HTTPException(status_code=503, detail="Hermes CLI 未安装或不在 PATH 中")
+
+    command = [*parts]
+    if hermes_session_id:
+        command.extend(["--resume", hermes_session_id])
+    command.append(message)
+
+    try:
+        result = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=settings.hermes_chat_timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise HTTPException(status_code=504, detail="Hermes 聊天响应超时") from error
+    except OSError as error:
+        raise HTTPException(status_code=503, detail=f"Hermes 聊天启动失败：{error}") from error
+
+    output = (result.stdout or "").strip()
+    if result.returncode != 0:
+        details = (result.stderr or output or f"exit code {result.returncode}").strip()
+        raise HTTPException(status_code=502, detail=f"Hermes 聊天失败：{details[:500]}")
+    if not output:
+        raise HTTPException(status_code=502, detail="Hermes 没有返回可显示的回复")
+    return {"content": output, "hermesSessionId": _parse_hermes_chat_session_id(result.stderr or "")}
 
 
 def _hermes_status(message: str = "") -> dict[str, Any]:
@@ -668,6 +730,84 @@ async def hermes_dashboard_api_pty_proxy(websocket: WebSocket):
 @app.websocket("/hermes-dashboard/api/events")
 async def hermes_dashboard_api_events_proxy(websocket: WebSocket):
     await _proxy_hermes_websocket(websocket, "/api/events")
+
+
+@app.get("/api/hermes-chat/conversations")
+def hermes_chat_conversations(request: Request):
+    user = require_permission(request, "hermes:chat")
+    return list_hermes_conversations(user["id"])
+
+
+@app.post("/api/hermes-chat/conversations", status_code=201)
+async def hermes_chat_create_conversation(request: Request):
+    user = require_permission(request, "hermes:chat")
+    data = await request.json()
+    return create_hermes_conversation(user["id"], str(data.get("title") or ""))
+
+
+@app.get("/api/hermes-chat/conversations/{conversation_id}")
+def hermes_chat_conversation(conversation_id: str, request: Request):
+    user = require_permission(request, "hermes:chat")
+    conversation = get_hermes_conversation(conversation_id, user["id"])
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return {**conversation, "messages": list_hermes_messages(conversation_id)}
+
+
+@app.post("/api/hermes-chat/conversations/{conversation_id}/messages", status_code=201)
+async def hermes_chat_send_message(conversation_id: str, request: Request):
+    user = require_permission(request, "hermes:chat")
+    conversation = get_hermes_conversation(conversation_id, user["id"])
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+
+    data = await request.json()
+    content = str(data.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=422, detail="消息不能为空")
+    if len(content) > 8000:
+        raise HTTPException(status_code=422, detail="消息太长了，请缩短后再发送")
+
+    reply = _run_hermes_chat(content, conversation.get("hermesSessionId") or "")
+    user_message = add_hermes_message(conversation_id, user["id"], "user", content)
+    assistant_message = add_hermes_message(conversation_id, user["id"], "assistant", reply["content"])
+    next_session_id = reply["hermesSessionId"] or conversation.get("hermesSessionId") or ""
+    title = _hermes_chat_title(content) if conversation.get("title") == "新的对话" else conversation["title"]
+    updated = update_hermes_conversation_after_message(conversation_id, title, next_session_id)
+    return {"conversation": updated, "messages": [user_message, assistant_message]}
+
+
+@app.delete("/api/hermes-chat/conversations/{conversation_id}")
+def hermes_chat_delete_conversation(conversation_id: str, request: Request):
+    user = require_permission(request, "hermes:chat")
+    result = soft_delete_hermes_conversation(conversation_id, user["id"])
+    if not result["ok"]:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return result
+
+
+@app.get("/api/admin/hermes-chat/conversations")
+def admin_hermes_chat_conversations(request: Request):
+    require_permission(request, "users:manage")
+    return list_admin_hermes_conversations()
+
+
+@app.get("/api/admin/hermes-chat/conversations/{conversation_id}")
+def admin_hermes_chat_conversation(conversation_id: str, request: Request):
+    require_permission(request, "users:manage")
+    conversation = get_hermes_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return {**conversation, "messages": list_hermes_messages(conversation_id)}
+
+
+@app.delete("/api/admin/hermes-chat/conversations/{conversation_id}")
+def admin_hermes_chat_delete_conversation(conversation_id: str, request: Request):
+    require_permission(request, "users:manage")
+    result = soft_delete_hermes_conversation(conversation_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return result
 
 
 @app.get("/api/admin/users")

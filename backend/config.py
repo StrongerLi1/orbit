@@ -26,6 +26,8 @@ class Settings:
     hermes_dashboard_command = os.getenv("HERMES_DASHBOARD_COMMAND", "hermes dashboard --host 127.0.0.1 --port 9119 --no-open")
     hermes_dashboard_stop_command = os.getenv("HERMES_DASHBOARD_STOP_COMMAND", "hermes dashboard --stop")
     hermes_dashboard_timeout = float(os.getenv("HERMES_DASHBOARD_TIMEOUT", "5"))
+    hermes_chat_command = os.getenv("HERMES_CHAT_COMMAND", "hermes chat -Q -q")
+    hermes_chat_timeout = float(os.getenv("HERMES_CHAT_TIMEOUT", "120"))
     session_secret = os.getenv("SESSION_SECRET", "dev-session-secret-change-me")
     jwt_secret = os.getenv("JWT_SECRET") or session_secret
     jwt_access_minutes = int(os.getenv("JWT_ACCESS_MINUTES", "15"))

@@ -117,3 +117,162 @@ def folder_has_bookmarks(name: str) -> bool:
         with conn.cursor() as cursor:
             cursor.execute("SELECT id FROM bookmarks WHERE category = %s LIMIT 1", (name,))
             return cursor.fetchone() is not None
+
+
+def _conversation_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "userId": row["user_id"],
+        "username": row.get("username", ""),
+        "title": row["title"],
+        "hermesSessionId": row["hermes_session_id"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "deletedAt": row["deleted_at"],
+    }
+
+
+def _message_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "conversationId": row["conversation_id"],
+        "userId": row["user_id"],
+        "role": row["role"],
+        "content": row["content"],
+        "createdAt": row["created_at"],
+    }
+
+
+def list_hermes_conversations(user_id: str) -> list[dict[str, Any]]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT *
+                FROM hermes_conversations
+                WHERE user_id = %s AND deleted_at = ''
+                ORDER BY updated_at DESC
+                """,
+                (user_id,),
+            )
+            return [_conversation_row(row) for row in cursor.fetchall()]
+
+
+def list_admin_hermes_conversations() -> list[dict[str, Any]]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT c.*, u.username
+                FROM hermes_conversations c
+                JOIN users u ON u.id = c.user_id
+                WHERE c.deleted_at = ''
+                ORDER BY c.updated_at DESC
+                """
+            )
+            return [_conversation_row(row) for row in cursor.fetchall()]
+
+
+def create_hermes_conversation(user_id: str, title: str = "") -> dict[str, Any]:
+    created_at = now_iso()
+    conversation_id = str(uuid.uuid4())
+    clean_title = (title or "").strip()[:80] or "新的对话"
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO hermes_conversations
+                    (id, user_id, title, hermes_session_id, created_at, updated_at, deleted_at)
+                VALUES (%s, %s, %s, '', %s, %s, '')
+                """,
+                (conversation_id, user_id, clean_title, created_at, created_at),
+            )
+    conversation = get_hermes_conversation(conversation_id, user_id)
+    if conversation is None:
+        raise RuntimeError("Hermes conversation was not created")
+    return conversation
+
+
+def get_hermes_conversation(conversation_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+    where = "c.id = %s AND c.deleted_at = ''"
+    params: tuple[Any, ...] = (conversation_id,)
+    if user_id is not None:
+        where += " AND c.user_id = %s"
+        params = (conversation_id, user_id)
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"""
+                SELECT c.*, u.username
+                FROM hermes_conversations c
+                LEFT JOIN users u ON u.id = c.user_id
+                WHERE {where}
+                """,
+                params,
+            )
+            row = cursor.fetchone()
+            return _conversation_row(row) if row else None
+
+
+def list_hermes_messages(conversation_id: str) -> list[dict[str, Any]]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT *
+                FROM hermes_messages
+                WHERE conversation_id = %s
+                ORDER BY created_at ASC
+                """,
+                (conversation_id,),
+            )
+            return [_message_row(row) for row in cursor.fetchall()]
+
+
+def add_hermes_message(conversation_id: str, user_id: str, role: str, content: str) -> dict[str, Any]:
+    message_id = str(uuid.uuid4())
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO hermes_messages
+                    (id, conversation_id, user_id, role, content, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (message_id, conversation_id, user_id, role, content, created_at),
+            )
+            cursor.execute("SELECT * FROM hermes_messages WHERE id = %s", (message_id,))
+            return _message_row(cursor.fetchone())
+
+
+def update_hermes_conversation_after_message(
+    conversation_id: str,
+    title: str,
+    hermes_session_id: str,
+) -> dict[str, Any] | None:
+    updated_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE hermes_conversations
+                SET title = %s, hermes_session_id = %s, updated_at = %s
+                WHERE id = %s AND deleted_at = ''
+                """,
+                (title, hermes_session_id, updated_at, conversation_id),
+            )
+    return get_hermes_conversation(conversation_id)
+
+
+def soft_delete_hermes_conversation(conversation_id: str, user_id: str | None = None) -> dict[str, bool]:
+    deleted_at = now_iso()
+    where = "id = %s AND deleted_at = ''"
+    params: tuple[Any, ...] = (deleted_at, conversation_id)
+    if user_id is not None:
+        where += " AND user_id = %s"
+        params = (deleted_at, conversation_id, user_id)
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(f"UPDATE hermes_conversations SET deleted_at = %s WHERE {where}", params)
+            return {"ok": cursor.rowcount > 0}
