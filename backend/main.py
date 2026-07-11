@@ -1,6 +1,8 @@
 import asyncio
 from pathlib import Path
 import json
+import logging
+import os
 import re
 import shlex
 import shutil
@@ -14,7 +16,7 @@ from urllib.parse import urlparse
 
 import websockets
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnect
 
@@ -43,6 +45,7 @@ from .auth import (
 )
 from .config import PUBLIC_DIR, settings
 from .database import COLLECTIONS, initialize_database
+from .hermes_stream_pool import HermesStreamLease, HermesStreamPool
 from .repository import (
     create_item,
     delete_item,
@@ -56,6 +59,7 @@ from .repository import (
     list_hermes_conversations,
     list_hermes_messages,
     list_items,
+    hermes_chat_user_lock,
     soft_delete_hermes_conversation,
     update_hermes_conversation_after_message,
     update_item,
@@ -63,11 +67,29 @@ from .repository import (
 
 
 app = FastAPI(title=settings.app_name)
+logger = logging.getLogger(__name__)
+_hermes_stream_pool: HermesStreamPool | None = None
+_hermes_active_streams: dict[str, Any] = {}
+_hermes_stop_requests: set[str] = set()
+_hermes_background_tasks: set[asyncio.Task] = set()
 
 
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     initialize_database()
+    await _warm_hermes_stream_pool()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    global _hermes_stream_pool
+    for task in list(_hermes_background_tasks):
+        task.cancel()
+    if _hermes_background_tasks:
+        await asyncio.gather(*_hermes_background_tasks, return_exceptions=True)
+    if _hermes_stream_pool is not None:
+        await _hermes_stream_pool.close()
+        _hermes_stream_pool = None
 
 
 def validate(collection: str, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -238,16 +260,11 @@ def _command_available(parts: list[str]) -> bool:
     return bool(executable and executable.exists()) or shutil.which(parts[0]) is not None
 
 
-def _hermes_chat_command_parts() -> list[str]:
+def _hermes_stream_command_parts() -> list[str]:
     try:
-        return shlex.split(settings.hermes_chat_command)
+        return shlex.split(settings.hermes_stream_command)
     except ValueError as error:
-        raise HTTPException(status_code=503, detail="Hermes 聊天命令配置无效，请检查 HERMES_CHAT_COMMAND") from error
-
-
-def _parse_hermes_chat_session_id(stderr: str) -> str:
-    match = re.search(r"session_id:\s*([^\s]+)", stderr or "")
-    return match.group(1) if match else ""
+        raise HTTPException(status_code=503, detail="Hermes 流式命令配置无效，请检查 HERMES_STREAM_COMMAND") from error
 
 
 def _hermes_chat_title(content: str) -> str:
@@ -255,64 +272,98 @@ def _hermes_chat_title(content: str) -> str:
     return (title[:30] + "…") if len(title) > 30 else title or "新的对话"
 
 
-def _hermes_chat_command(message: str, hermes_session_id: str = "") -> list[str]:
-    command = _hermes_chat_command_parts()
-    query_flags = {"-q", "--query"}
-    query_index = next((index for index, part in enumerate(command) if part in query_flags), -1)
-    if query_index >= 0 and query_index != len(command) - 1:
-        raise HTTPException(status_code=503, detail="HERMES_CHAT_COMMAND 请不要预填 query 内容")
-    if hermes_session_id:
-        insert_at = query_index if query_index >= 0 else len(command)
-        command[insert_at:insert_at] = ["--resume", hermes_session_id]
-    if query_index >= 0:
-        command.append(message)
-    else:
-        command.extend(["-q", message])
-    return command
+async def _get_hermes_stream_pool() -> HermesStreamPool:
+    global _hermes_stream_pool
+    parts = _hermes_stream_command_parts()
+    if not parts:
+        raise HTTPException(status_code=503, detail="Hermes 流式聊天尚未配置，请设置 HERMES_STREAM_COMMAND")
+    if not _command_available(parts):
+        raise HTTPException(status_code=503, detail="Hermes 流式命令不可用，请检查 HERMES_STREAM_COMMAND")
+    if _hermes_stream_pool is None:
+        _hermes_stream_pool = HermesStreamPool(parts, settings.hermes_stream_pool_size)
+    try:
+        await _hermes_stream_pool.start()
+    except (OSError, ValueError, json.JSONDecodeError, asyncio.TimeoutError, RuntimeError) as error:
+        raise HTTPException(status_code=503, detail=f"Hermes worker 池启动失败：{error}") from error
+    return _hermes_stream_pool
 
 
-def _clean_hermes_chat_output(output: str) -> str:
-    lines = []
-    for line in (output or "").splitlines():
-        clean = line.strip()
-        if "tirith security scanner enabled but not available" in clean:
-            continue
-        lines.append(line)
-    return "\n".join(lines).strip()
+async def _warm_hermes_stream_pool() -> None:
+    if not settings.hermes_stream_command:
+        return
+    try:
+        await _get_hermes_stream_pool()
+    except Exception as error:
+        logger.warning("Hermes worker pool warm-up skipped: %s", error)
 
 
-def _run_hermes_chat(message: str, hermes_session_id: str = "") -> dict[str, str]:
+async def _start_hermes_stream(message: str, hermes_session_id: str = "", conversation_key: str = ""):
     status = _hermes_status()
     if not status.get("running"):
         raise HTTPException(status_code=503, detail="Hermes dashboard 尚未运行，请联系管理员启动")
 
-    parts = _hermes_chat_command_parts()
-    if not _command_available(parts):
-        raise HTTPException(status_code=503, detail="Hermes CLI 未安装或不在 PATH 中")
-
-    command = _hermes_chat_command(message, hermes_session_id)
+    try:
+        pool = await _get_hermes_stream_pool()
+        lease = await pool.acquire(
+            conversation_key or hermes_session_id or "new",
+            timeout=settings.hermes_stream_pool_wait_timeout,
+        )
+    except asyncio.TimeoutError as error:
+        raise HTTPException(status_code=503, detail="Hermes worker 池正忙，请稍后再试") from error
 
     try:
-        result = subprocess.run(
-            command,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=settings.hermes_chat_timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as error:
-        raise HTTPException(status_code=504, detail="Hermes 聊天响应超时") from error
-    except OSError as error:
-        raise HTTPException(status_code=503, detail=f"Hermes 聊天启动失败：{error}") from error
+        await lease.send({
+            "content": message,
+            "hermesSessionId": hermes_session_id,
+            "conversationKey": conversation_key,
+        })
+    except (BrokenPipeError, ConnectionResetError) as error:
+        await lease.release(reusable=False)
+        raise HTTPException(status_code=502, detail="Hermes 流式桥接启动失败") from error
+    return lease
 
-    output = _clean_hermes_chat_output(result.stdout or "")
-    if result.returncode != 0:
-        details = (result.stderr or output or f"exit code {result.returncode}").strip()
-        raise HTTPException(status_code=502, detail=f"Hermes 聊天失败：{details[:500]}")
-    if not output:
-        raise HTTPException(status_code=502, detail="Hermes 没有返回可显示的回复")
-    return {"content": output, "hermesSessionId": _parse_hermes_chat_session_id(result.stderr or "")}
+
+async def _stop_hermes_stream(process, reusable: bool = False) -> None:
+    if isinstance(process, HermesStreamLease):
+        await process.release(reusable=reusable)
+        return
+    if process.returncode is not None:
+        return
+    try:
+        os.killpg(process.pid, 15)
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(process.wait(), timeout=2)
+    except asyncio.TimeoutError:
+        try:
+            os.killpg(process.pid, 9)
+        except ProcessLookupError:
+            pass
+        await process.wait()
+
+
+def _parse_hermes_stream_record(raw: bytes) -> dict[str, str]:
+    if not raw or len(raw) > 1_000_000:
+        raise ValueError("invalid Hermes stream record size")
+    record = json.loads(raw.decode("utf-8"))
+    if not isinstance(record, dict) or record.get("type") not in {"started", "delta", "completed", "error"}:
+        raise ValueError("invalid Hermes stream record")
+    kind = record["type"]
+    result = {"type": kind}
+    if kind in {"delta", "completed"}:
+        if not isinstance(record.get("content"), str):
+            raise ValueError("invalid Hermes stream content")
+        result["content"] = record["content"]
+    if kind in {"started", "completed"}:
+        result["hermesSessionId"] = str(record.get("hermesSessionId") or "")[:120]
+    if kind == "error":
+        result["error"] = str(record.get("error") or "Hermes 运行失败")[:500]
+    return result
+
+
+def _sse_event(event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 def _hermes_status(message: str = "") -> dict[str, Any]:
@@ -755,6 +806,194 @@ async def hermes_dashboard_api_events_proxy(websocket: WebSocket):
     await _proxy_hermes_websocket(websocket, "/api/events")
 
 
+async def _hermes_stream_records(process):
+    assert process.stdout is not None
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + settings.hermes_chat_timeout if settings.hermes_chat_timeout > 0 else None
+    while True:
+        remaining = deadline - loop.time() if deadline is not None else None
+        if remaining is not None and remaining <= 0:
+            raise asyncio.TimeoutError
+        try:
+            raw = await asyncio.wait_for(process.stdout.readline(), timeout=min(15, remaining) if remaining is not None else 15)
+        except asyncio.TimeoutError:
+            if deadline is not None and loop.time() >= deadline:
+                raise
+            yield None
+            continue
+        if not raw:
+            raise EOFError("Hermes stream ended")
+        record = _parse_hermes_stream_record(raw)
+        yield record
+        if record["type"] in {"completed", "error"}:
+            return
+
+
+def _persist_interrupted_hermes_message(
+    conversation_id: str,
+    user_id: str,
+    title: str,
+    hermes_session_id: str,
+    chunks: list[str],
+) -> None:
+    content = "".join(chunks)
+    if not content:
+        return
+    add_hermes_message(conversation_id, user_id, "assistant", content, status="interrupted")
+    update_hermes_conversation_after_message(conversation_id, title, hermes_session_id)
+
+
+def _finish_hermes_generation(conversation_id: str, process, lock_context) -> None:
+    if _hermes_active_streams.get(conversation_id) is process:
+        _hermes_active_streams.pop(conversation_id, None)
+    _hermes_stop_requests.discard(conversation_id)
+    lock_context.__exit__(None, None, None)
+
+
+def _track_hermes_background_task(coro) -> None:
+    task = asyncio.create_task(coro)
+    _hermes_background_tasks.add(task)
+
+    def done(completed: asyncio.Task) -> None:
+        _hermes_background_tasks.discard(completed)
+        if not completed.cancelled() and completed.exception() is not None:
+            logger.error("Hermes background generation failed: %s", completed.exception())
+
+    task.add_done_callback(done)
+
+
+async def _finish_hermes_stream_in_background(
+    process,
+    lock_context,
+    conversation_id: str,
+    user_id: str,
+    title: str,
+    hermes_session_id: str,
+    chunks: list[str],
+) -> None:
+    terminal = False
+    timed_out = False
+    try:
+        async for record in _hermes_stream_records(process):
+            if record is None:
+                continue
+            kind = record["type"]
+            if kind == "started":
+                hermes_session_id = record["hermesSessionId"] or hermes_session_id
+                update_hermes_conversation_after_message(conversation_id, title, hermes_session_id)
+            elif kind == "delta":
+                chunks.append(record["content"])
+            elif kind == "completed":
+                hermes_session_id = record["hermesSessionId"] or hermes_session_id
+                content = "".join(chunks) or record["content"]
+                if content.strip():
+                    add_hermes_message(conversation_id, user_id, "assistant", content)
+                    update_hermes_conversation_after_message(conversation_id, title, hermes_session_id)
+                terminal = True
+            else:
+                terminal = True
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        timed_out = True
+    except (EOFError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        pass
+    finally:
+        stopped = conversation_id in _hermes_stop_requests
+        await asyncio.shield(_stop_hermes_stream(process, reusable=terminal and not stopped))
+        if (stopped or (not terminal and not timed_out)) and chunks:
+            _persist_interrupted_hermes_message(conversation_id, user_id, title, hermes_session_id, chunks)
+        _finish_hermes_generation(conversation_id, process, lock_context)
+
+
+async def _hermes_chat_stream_events(
+    process,
+    lock_context,
+    conversation_id: str,
+    user_id: str,
+    title: str,
+    hermes_session_id: str,
+    user_message: dict[str, Any],
+    conversation: dict[str, Any],
+):
+    chunks: list[str] = []
+    terminal = False
+    settled = False
+    detached = False
+    try:
+        yield _sse_event("started", {"conversation": conversation, "userMessage": user_message})
+        async for record in _hermes_stream_records(process):
+            if record is None:
+                yield ": keep-alive\n\n"
+                continue
+            kind = record["type"]
+            if kind == "started":
+                hermes_session_id = record["hermesSessionId"] or hermes_session_id
+                update_hermes_conversation_after_message(conversation_id, title, hermes_session_id)
+            elif kind == "delta":
+                chunks.append(record["content"])
+                yield _sse_event("delta", {"content": record["content"]})
+            elif kind == "completed":
+                hermes_session_id = record["hermesSessionId"] or hermes_session_id
+                content = "".join(chunks) or record["content"]
+                if not content.strip():
+                    settled = True
+                    terminal = True
+                    yield _sse_event("error", {"status": 502, "detail": "Hermes 没有返回可显示的回复"})
+                    continue
+                assistant_message = add_hermes_message(
+                    conversation_id,
+                    user_id,
+                    "assistant",
+                    content,
+                )
+                updated = update_hermes_conversation_after_message(
+                    conversation_id,
+                    title,
+                    hermes_session_id,
+                )
+                settled = True
+                terminal = True
+                if not chunks:
+                    yield _sse_event("delta", {"content": content})
+                yield _sse_event("completed", {"conversation": updated, "message": assistant_message})
+            else:
+                settled = True
+                terminal = True
+                yield _sse_event("error", {"status": 502, "detail": record["error"]})
+    except (asyncio.CancelledError, GeneratorExit):
+        detached = not settled and conversation_id not in _hermes_stop_requests
+        raise
+    except asyncio.TimeoutError:
+        settled = True
+        yield _sse_event("error", {"status": 504, "detail": "Hermes 聊天响应超时"})
+    except EOFError:
+        settled = True
+        yield _sse_event("error", {"status": 502, "detail": "Hermes 流式连接意外结束"})
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        settled = True
+        yield _sse_event("error", {"status": 502, "detail": "Hermes 流式响应格式无效"})
+    finally:
+        if detached:
+            _track_hermes_background_task(
+                _finish_hermes_stream_in_background(
+                    process,
+                    lock_context,
+                    conversation_id,
+                    user_id,
+                    title,
+                    hermes_session_id,
+                    chunks,
+                )
+            )
+        else:
+            stopped = conversation_id in _hermes_stop_requests
+            await asyncio.shield(_stop_hermes_stream(process, reusable=terminal and not stopped))
+            if stopped and chunks:
+                _persist_interrupted_hermes_message(conversation_id, user_id, title, hermes_session_id, chunks)
+            _finish_hermes_generation(conversation_id, process, lock_context)
+
+
 @app.get("/api/hermes-chat/conversations")
 def hermes_chat_conversations(request: Request):
     user = require_permission(request, "hermes:chat")
@@ -774,11 +1013,15 @@ def hermes_chat_conversation(conversation_id: str, request: Request):
     conversation = get_hermes_conversation(conversation_id, user["id"])
     if not conversation:
         raise HTTPException(status_code=404, detail="对话不存在")
-    return {**conversation, "messages": list_hermes_messages(conversation_id)}
+    return {
+        **conversation,
+        "messages": list_hermes_messages(conversation_id),
+        "generating": conversation_id in _hermes_active_streams,
+    }
 
 
-@app.post("/api/hermes-chat/conversations/{conversation_id}/messages", status_code=201)
-async def hermes_chat_send_message(conversation_id: str, request: Request):
+@app.post("/api/hermes-chat/conversations/{conversation_id}/messages/stream")
+async def hermes_chat_stream_message(conversation_id: str, request: Request):
     user = require_permission(request, "hermes:chat")
     conversation = get_hermes_conversation(conversation_id, user["id"])
     if not conversation:
@@ -791,13 +1034,52 @@ async def hermes_chat_send_message(conversation_id: str, request: Request):
     if len(content) > 8000:
         raise HTTPException(status_code=422, detail="消息太长了，请缩短后再发送")
 
-    reply = _run_hermes_chat(content, conversation.get("hermesSessionId") or "")
-    user_message = add_hermes_message(conversation_id, user["id"], "user", content)
-    assistant_message = add_hermes_message(conversation_id, user["id"], "assistant", reply["content"])
-    next_session_id = reply["hermesSessionId"] or conversation.get("hermesSessionId") or ""
-    title = _hermes_chat_title(content) if conversation.get("title") == "新的对话" else conversation["title"]
-    updated = update_hermes_conversation_after_message(conversation_id, title, next_session_id)
-    return {"conversation": updated, "messages": [user_message, assistant_message]}
+    lock_context = hermes_chat_user_lock(user["id"])
+    if not lock_context.__enter__():
+        lock_context.__exit__(None, None, None)
+        raise HTTPException(status_code=409, detail="已有 Hermes 回答正在生成，请先等待或停止")
+
+    process = None
+    try:
+        hermes_session_id = conversation.get("hermesSessionId") or ""
+        process = await _start_hermes_stream(content, hermes_session_id, conversation_id)
+        user_message = add_hermes_message(conversation_id, user["id"], "user", content)
+        title = _hermes_chat_title(content) if conversation.get("title") == "新的对话" else conversation["title"]
+        updated = update_hermes_conversation_after_message(conversation_id, title, hermes_session_id)
+        _hermes_active_streams[conversation_id] = process
+    except Exception:
+        if process is not None:
+            await _stop_hermes_stream(process)
+        lock_context.__exit__(None, None, None)
+        raise
+
+    return StreamingResponse(
+        _hermes_chat_stream_events(
+            process,
+            lock_context,
+            conversation_id,
+            user["id"],
+            title,
+            hermes_session_id,
+            user_message,
+            updated,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/hermes-chat/conversations/{conversation_id}/messages/stop")
+async def hermes_chat_stop_message(conversation_id: str, request: Request):
+    user = require_permission(request, "hermes:chat")
+    if not get_hermes_conversation(conversation_id, user["id"]):
+        raise HTTPException(status_code=404, detail="对话不存在")
+    process = _hermes_active_streams.get(conversation_id)
+    if process is None:
+        raise HTTPException(status_code=409, detail="这条对话当前没有正在生成的回答")
+    _hermes_stop_requests.add(conversation_id)
+    await _stop_hermes_stream(process, reusable=False)
+    return {"ok": True}
 
 
 @app.delete("/api/hermes-chat/conversations/{conversation_id}")

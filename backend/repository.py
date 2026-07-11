@@ -1,5 +1,6 @@
 import json
 import uuid
+from contextlib import contextmanager
 from typing import Any
 
 from .database import connection, now_iso
@@ -139,6 +140,7 @@ def _message_row(row: dict[str, Any]) -> dict[str, Any]:
         "userId": row["user_id"],
         "role": row["role"],
         "content": row["content"],
+        "status": row.get("status") or "completed",
         "createdAt": row["created_at"],
     }
 
@@ -229,7 +231,13 @@ def list_hermes_messages(conversation_id: str) -> list[dict[str, Any]]:
             return [_message_row(row) for row in cursor.fetchall()]
 
 
-def add_hermes_message(conversation_id: str, user_id: str, role: str, content: str) -> dict[str, Any]:
+def add_hermes_message(
+    conversation_id: str,
+    user_id: str,
+    role: str,
+    content: str,
+    status: str = "completed",
+) -> dict[str, Any]:
     message_id = str(uuid.uuid4())
     created_at = now_iso()
     with connection() as conn:
@@ -237,13 +245,31 @@ def add_hermes_message(conversation_id: str, user_id: str, role: str, content: s
             cursor.execute(
                 """
                 INSERT INTO hermes_messages
-                    (id, conversation_id, user_id, role, content, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                    (id, conversation_id, user_id, role, content, status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (message_id, conversation_id, user_id, role, content, created_at),
+                (message_id, conversation_id, user_id, role, content, status, created_at),
             )
             cursor.execute("SELECT * FROM hermes_messages WHERE id = %s", (message_id,))
             return _message_row(cursor.fetchone())
+
+
+@contextmanager
+def hermes_chat_user_lock(user_id: str):
+    lock_name = f"orbit:hermes-chat:{user_id}"[:64]
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, 0) AS acquired", (lock_name,))
+            acquired = cursor.fetchone()["acquired"] == 1
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                try:
+                    with conn.cursor() as cursor:
+                        cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                except Exception:
+                    pass
 
 
 def update_hermes_conversation_after_message(

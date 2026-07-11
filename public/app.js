@@ -1,6 +1,7 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
+let hermesGenerationPollTimer = 0;
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -221,6 +222,14 @@ function renderHermes() {
   </dl>${state.hermes.details ? `<p class="hermes-details">${escapeHtml(state.hermes.details)}</p>` : ''}`;
 }
 
+function hermesMessageHtml(message, userLabel = '你') {
+  const user = message.role === 'user';
+  const thinking = message.temporary && message.status === 'streaming' && !message.content;
+  const content = thinking ? '<span class="loading-dot"></span> 正在思考' : escapeHtml(message.content);
+  const interrupted = message.status === 'interrupted' ? '<small class="hermes-message-status">用户终止回答</small>' : '';
+  return `<article class="hermes-message ${user ? 'user' : 'assistant'}"><div class="hermes-message-role">${user ? userLabel : 'Hermes'}</div><div class="hermes-message-content">${content}</div>${interrupted}</article>`;
+}
+
 function renderHermesChat() {
   const list = $('#hermes-chat-conversations');
   const room = $('#hermes-chat-room');
@@ -234,9 +243,14 @@ function renderHermesChat() {
     return;
   }
   form.hidden = false;
+  const button = form.querySelector('button');
+  const finishing = Boolean(state.hermesChat.stream?.serverCompleted);
   input.disabled = state.hermesChat.sending || !state.hermesChat.active;
-  form.querySelector('button').disabled = state.hermesChat.sending || !state.hermesChat.active;
-  form.querySelector('button').textContent = state.hermesChat.sending ? '等待中…' : '发送';
+  button.disabled = !state.hermesChat.active || state.hermesChat.stopping || finishing;
+  button.type = state.hermesChat.sending ? 'button' : 'submit';
+  button.textContent = state.hermesChat.sending ? (finishing ? '正在显示…' : state.hermesChat.stopping ? '正在停止…' : '停止生成') : '发送';
+  button.classList.toggle('primary', !state.hermesChat.sending);
+  button.classList.toggle('secondary', state.hermesChat.sending);
   if (state.hermesChat.loading) {
     list.innerHTML = empty('正在加载会话…');
     room.innerHTML = '<div class="empty"><span class="loading-dot"></span> 正在加载 Hermes 聊天…</div>';
@@ -252,8 +266,8 @@ function renderHermesChat() {
     return;
   }
   const messages = active.messages || [];
-  room.innerHTML = messages.map((message) => `<article class="hermes-message ${message.role === 'user' ? 'user' : 'assistant'}"><div class="hermes-message-role">${message.role === 'user' ? '你' : 'Hermes'}</div><div class="hermes-message-content">${escapeHtml(message.content)}</div></article>`).join('') || empty('这条会话还没有消息');
-  if (state.hermesChat.sending) room.innerHTML += '<div class="empty"><span class="loading-dot"></span> Hermes 正在回复…</div>';
+  const stream = state.hermesChat.stream?.conversationId === active.id ? [{ role:'assistant', content:state.hermesChat.stream.content, status:state.hermesChat.stream.status, temporary:true }] : [];
+  room.innerHTML = [...messages, ...stream].map((message) => hermesMessageHtml(message)).join('') || empty('这条会话还没有消息');
   room.scrollTop = room.scrollHeight;
 }
 
@@ -341,6 +355,52 @@ async function loadHermes() {
   renderHermes();
 }
 
+function scheduleHermesGenerationPoll(conversationId, delay = 2000) {
+  if (hermesGenerationPollTimer) clearTimeout(hermesGenerationPollTimer);
+  hermesGenerationPollTimer = setTimeout(() => { void pollHermesGeneration(conversationId); }, delay);
+}
+
+function resumeHermesBackgroundGeneration(conversation) {
+  if (!conversation?.generating) return false;
+  const current = state.hermesChat.stream;
+  if (current?.conversationId === conversation.id && state.hermesChat.sending) {
+    current.conversation = conversation;
+    return true;
+  }
+  state.hermesChat = {
+    ...state.hermesChat,
+    sending:true,
+    stopping:false,
+    stopped:false,
+    controller:null,
+    stream:{ conversationId:conversation.id, conversation, content:'', status:'streaming', background:true },
+    error:'',
+  };
+  scheduleHermesGenerationPoll(conversation.id);
+  return true;
+}
+
+async function pollHermesGeneration(conversationId) {
+  hermesGenerationPollTimer = 0;
+  if (!state.user || !canUseHermesChat() || state.hermesChat.stream?.conversationId !== conversationId) return;
+  try {
+    const conversation = await request(`/api/hermes-chat/conversations/${conversationId}`);
+    if (conversation.generating) {
+      state.hermesChat.stream.conversation = conversation;
+      if (state.hermesChat.activeId === conversationId) state.hermesChat.active = conversation;
+      renderHermesChat();
+      scheduleHermesGenerationPoll(conversationId);
+      return;
+    }
+    state.hermesChat = { ...state.hermesChat, sending:false, stopping:false, stopped:false, controller:null, stream:null, error:'' };
+    state.hermesChat.conversations = [conversation, ...state.hermesChat.conversations.filter((item) => item.id !== conversationId)];
+    if (state.hermesChat.activeId === conversationId) state.hermesChat.active = conversation;
+    renderHermesChat();
+  } catch {
+    scheduleHermesGenerationPoll(conversationId, 3000);
+  }
+}
+
 async function loadHermesChat() {
   if (!canUseHermesChat()) return;
   state.hermesChat.loading = true;
@@ -351,6 +411,7 @@ async function loadHermesChat() {
     const activeId = conversations.some((item) => item.id === state.hermesChat.activeId) ? state.hermesChat.activeId : conversations[0]?.id || '';
     const active = activeId ? await request(`/api/hermes-chat/conversations/${activeId}`) : null;
     state.hermesChat = { ...state.hermesChat, loading: false, conversations, activeId, active, error: '' };
+    resumeHermesBackgroundGeneration(active);
   } catch (error) {
     state.hermesChat = { ...state.hermesChat, loading: false, error: error.message };
     toast(error.message);
@@ -365,8 +426,11 @@ async function loadHermesChatConversation(id) {
   renderHermesChat();
   try {
     const active = await request(`/api/hermes-chat/conversations/${id}`);
+    if (state.hermesChat.activeId !== id) return;
     state.hermesChat = { ...state.hermesChat, loading: false, active, activeId: id, error: '' };
+    resumeHermesBackgroundGeneration(active);
   } catch (error) {
+    if (state.hermesChat.activeId !== id) return;
     state.hermesChat = { ...state.hermesChat, loading: false, error: error.message };
     toast(error.message);
   }
@@ -375,6 +439,7 @@ async function loadHermesChatConversation(id) {
 
 async function createHermesChatConversation() {
   if (!canUseHermesChat()) return;
+  if (state.hermesChat.sending) { toast('请先停止或等待当前回答'); return; }
   try {
     const conversation = await request('/api/hermes-chat/conversations', { method:'POST', body:JSON.stringify({}) });
     state.hermesChat.conversations = [conversation, ...state.hermesChat.conversations];
@@ -387,26 +452,196 @@ async function createHermesChatConversation() {
   }
 }
 
+async function streamHermesChat(url, content, signal, onEvent, retry = true) {
+  const response = await fetch(url, { method:'POST', headers:{ 'content-type':'application/json', accept:'text/event-stream' }, body:JSON.stringify({ content }), signal });
+  if (response.status === 401 && retry && await refreshAuth()) return streamHermesChat(url, content, signal, onEvent, false);
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.error || 'Hermes 请求失败');
+  }
+  if (!response.headers.get('content-type')?.includes('text/event-stream') || !response.body) throw new Error('Hermes 流式响应格式无效');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const consume = () => {
+    while (true) {
+      const boundary = buffer.match(/\r?\n\r?\n/);
+      if (!boundary) return;
+      const block = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary[0].length);
+      let event = 'message';
+      const data = [];
+      for (const line of block.split(/\r?\n/)) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        if (line.startsWith('data:')) data.push(line.slice(5).trimStart());
+      }
+      if (data.length) onEvent(event, JSON.parse(data.join('\n')));
+    }
+  };
+  while (true) {
+    let packet;
+    try {
+      packet = await reader.read();
+    } catch (error) {
+      error.backgroundRecoverable = true;
+      throw error;
+    }
+    const { value, done } = packet;
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    consume();
+    if (done) break;
+  }
+}
+
+function createHermesStreamPacer(conversationId) {
+  const queue = [];
+  const waiters = [];
+  let frameId = 0;
+
+  const finishWaiters = () => waiters.splice(0).forEach((resolve) => resolve());
+  const schedule = () => {
+    if (!frameId) frameId = requestAnimationFrame(tick);
+  };
+  const tick = () => {
+    frameId = 0;
+    const stream = state.hermesChat.stream;
+    if (!stream || stream.conversationId !== conversationId) {
+      queue.length = 0;
+      finishWaiters();
+      return;
+    }
+    const frameSize = Math.min(32, Math.max(1, Math.ceil(queue.length / 8)));
+    stream.content += queue.splice(0, frameSize).join('');
+    renderHermesChat();
+    if (queue.length) schedule();
+    else finishWaiters();
+  };
+
+  return {
+    push(content) {
+      for (const character of String(content || '')) queue.push(character);
+      if (queue.length) schedule();
+    },
+    drain() {
+      if (!queue.length && !frameId) return Promise.resolve();
+      return new Promise((resolve) => waiters.push(resolve));
+    },
+    flush() {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = 0;
+      const stream = state.hermesChat.stream;
+      if (stream?.conversationId === conversationId && queue.length) stream.content += queue.splice(0).join('');
+      else queue.length = 0;
+      finishWaiters();
+      renderHermesChat();
+    },
+    cancel() {
+      if (frameId) cancelAnimationFrame(frameId);
+      frameId = 0;
+      queue.length = 0;
+      finishWaiters();
+    },
+  };
+}
+
 async function sendHermesChatMessage(content) {
   const conversationId = state.hermesChat.activeId;
   if (!conversationId || state.hermesChat.sending) return;
-  state.hermesChat.sending = true;
+  const controller = new AbortController();
+  state.hermesChat = { ...state.hermesChat, sending:true, stopping:false, stopped:false, controller, stream:{ conversationId, conversation:state.hermesChat.active, content:'', status:'streaming' }, error:'' };
+  const pacer = createHermesStreamPacer(conversationId);
+  state.hermesChat.stream.pacer = pacer;
+  renderHermesChat();
+  let completion = null;
+  let streamConversation = state.hermesChat.stream.conversation;
+  try {
+    await streamHermesChat(`/api/hermes-chat/conversations/${conversationId}/messages/stream`, content, controller.signal, (event, payload) => {
+      const stream = state.hermesChat.stream;
+      if (!stream || stream.conversationId !== conversationId) return;
+      if (event === 'started') {
+        const messages = [...(stream.conversation?.messages || []), payload.userMessage];
+        stream.conversation = { ...payload.conversation, messages };
+        streamConversation = stream.conversation;
+        if (state.hermesChat.activeId === conversationId) state.hermesChat.active = stream.conversation;
+      } else if (event === 'delta') {
+        pacer.push(payload.content);
+      } else if (event === 'completed') {
+        completion = payload;
+        state.hermesChat.stream.serverCompleted = true;
+      } else if (event === 'error') {
+        throw new Error(payload.detail || 'Hermes 运行失败');
+      }
+      renderHermesChat();
+    });
+    if (!completion) {
+      const error = new Error('Hermes 流式连接意外结束');
+      error.backgroundRecoverable = true;
+      throw error;
+    }
+    await pacer.drain();
+    const messages = [...(state.hermesChat.stream?.conversation?.messages || []), completion.message];
+    streamConversation = { ...completion.conversation, messages };
+    if (state.hermesChat.activeId === conversationId) state.hermesChat.active = streamConversation;
+    state.hermesChat.stream = null;
+  } catch (error) {
+    if (state.hermesChat.stopped) {
+      pacer.flush();
+      const stream = state.hermesChat.stream;
+      const partial = stream?.content || '';
+      if (partial && stream?.conversation) {
+        streamConversation = { ...stream.conversation, messages:[...(stream.conversation.messages || []), { role:'assistant', content:partial, status:'interrupted' }] };
+        if (state.hermesChat.activeId === conversationId) state.hermesChat.active = streamConversation;
+      }
+      state.hermesChat.stream = null;
+      state.hermesChat.error = '';
+    } else if (error.backgroundRecoverable || error.name === 'TypeError') {
+      pacer.flush();
+      const stream = state.hermesChat.stream;
+      if (stream) {
+        stream.background = true;
+        stream.pacer = null;
+        stream.content = '';
+        streamConversation = stream.conversation || streamConversation;
+      }
+      state.hermesChat = { ...state.hermesChat, sending:true, stopping:false, stopped:false, controller:null, error:'' };
+      if (streamConversation) state.hermesChat.conversations = [streamConversation, ...state.hermesChat.conversations.filter((item) => item.id !== conversationId)];
+      scheduleHermesGenerationPoll(conversationId, 500);
+      renderHermesChat();
+      return;
+    } else {
+      pacer.cancel();
+      streamConversation = state.hermesChat.stream?.conversation || streamConversation;
+      state.hermesChat.stream = null;
+      state.hermesChat.error = error.message;
+      toast(error.message);
+    }
+  }
+  state.hermesChat = { ...state.hermesChat, sending:false, stopping:false, stopped:false, controller:null };
+  if (streamConversation) state.hermesChat.conversations = [streamConversation, ...state.hermesChat.conversations.filter((item) => item.id !== conversationId)];
+  renderHermesChat();
+}
+
+async function stopHermesChatMessage() {
+  if (!state.hermesChat.sending) return;
+  if (state.hermesChat.stream?.serverCompleted) return;
+  const conversationId = state.hermesChat.stream?.conversationId;
+  const controller = state.hermesChat.controller;
+  if (!conversationId) return;
+  state.hermesChat.stopped = true;
+  state.hermesChat.stopping = true;
+  state.hermesChat.stream?.pacer?.flush();
   renderHermesChat();
   try {
-    const result = await request(`/api/hermes-chat/conversations/${conversationId}/messages`, { method:'POST', body:JSON.stringify({ content }) });
-    const messages = [...(state.hermesChat.active?.messages || []), ...(result.messages || [])];
-    state.hermesChat.active = { ...(result.conversation || state.hermesChat.active), messages };
-    state.hermesChat.conversations = [
-      state.hermesChat.active,
-      ...state.hermesChat.conversations.filter((item) => item.id !== conversationId),
-    ];
-    state.hermesChat.error = '';
+    await request(`/api/hermes-chat/conversations/${conversationId}/messages/stop`, { method:'POST', body:JSON.stringify({}) });
+    if (controller) controller.abort();
+    else scheduleHermesGenerationPoll(conversationId, 250);
   } catch (error) {
-    state.hermesChat.error = error.message;
+    state.hermesChat.stopped = false;
+    state.hermesChat.stopping = false;
     toast(error.message);
+    renderHermesChat();
   }
-  state.hermesChat.sending = false;
-  renderHermesChat();
 }
 
 function renderAdmin() {
@@ -447,7 +682,7 @@ function renderAdmin() {
   if (hermesDetail) {
     const active = state.admin.hermesChatActive;
     const messages = active?.messages || [];
-    hermesDetail.innerHTML = active ? `<div class="admin-hermes-title"><strong>${escapeHtml(active.title)}</strong><small>${escapeHtml(active.username || active.userId)} · ${escapeHtml(active.createdAt)}</small></div>${messages.map((message) => `<article class="hermes-message ${message.role === 'user' ? 'user' : 'assistant'}"><div class="hermes-message-role">${message.role === 'user' ? '用户' : 'Hermes'}</div><div class="hermes-message-content">${escapeHtml(message.content)}</div></article>`).join('') || empty('这条会话还没有消息')}` : empty('选择一条会话查看内容');
+    hermesDetail.innerHTML = active ? `<div class="admin-hermes-title"><strong>${escapeHtml(active.title)}</strong><small>${escapeHtml(active.username || active.userId)} · ${escapeHtml(active.createdAt)}</small></div>${messages.map((message) => hermesMessageHtml(message, '用户')).join('') || empty('这条会话还没有消息')}` : empty('选择一条会话查看内容');
   }
 }
 
@@ -597,6 +832,7 @@ document.addEventListener('click', async (event) => {
   }
   const hermesChatDelete = event.target.closest('[data-hermes-chat-delete]');
   if (hermesChatDelete) {
+    if (state.hermesChat.sending) { toast('请先停止或等待当前回答'); return; }
     const id = hermesChatDelete.dataset.hermesChatDelete;
     const conversation = state.hermesChat.conversations.find((item) => item.id === id);
     if (!confirm(`确定删除会话「${conversation?.title || ''}」吗？`)) return;
@@ -758,6 +994,11 @@ $('#hermes-chat-form').addEventListener('submit', async (event) => {
   if (!content) return;
   input.value = '';
   await sendHermesChatMessage(content);
+});
+$('#hermes-chat-form button').addEventListener('click', (event) => {
+  if (!state.hermesChat.sending) return;
+  event.preventDefault();
+  void stopHermesChatMessage();
 });
 document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape'){closeModal();closeAuthCaptcha();} });
 window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));

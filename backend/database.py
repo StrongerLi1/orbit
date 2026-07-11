@@ -178,11 +178,24 @@ def initialize_database() -> None:
                     user_id VARCHAR(64) NOT NULL,
                     role VARCHAR(20) NOT NULL,
                     content MEDIUMTEXT NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'completed',
                     created_at VARCHAR(40) NOT NULL,
                     INDEX idx_hermes_messages_conversation (conversation_id, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'hermes_messages' AND COLUMN_NAME = 'status'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute(
+                    "ALTER TABLE hermes_messages ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'completed' AFTER content"
+                )
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS users (

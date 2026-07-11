@@ -31,6 +31,10 @@ export MYSQL_DATABASE=orbit
 export PANSOU_BASE_URL=http://127.0.0.1:8888
 export HERMES_DASHBOARD_URL=http://127.0.0.1:9119
 export HERMES_DASHBOARD_PUBLIC_PATH=/hermes-dashboard
+export HERMES_STREAM_COMMAND="/path/to/hermes-agent/venv/bin/python -m backend.hermes_stream_bridge"
+export HERMES_STREAM_POOL_SIZE=2
+export HERMES_STREAM_POOL_WAIT_TIMEOUT=5
+export HERMES_CHAT_TIMEOUT=1800
 export SESSION_SECRET=change-me-to-a-long-random-string
 export JWT_SECRET=change-me-to-a-long-random-string
 export REDIS_HOST=127.0.0.1
@@ -53,9 +57,9 @@ npm start
 
 登录态使用双 JWT：短期 access token 放 HttpOnly Cookie，长期 refresh token 放 HttpOnly Cookie，并在 Redis 中保存 refresh token 的 jti，用于续期和退出登录时失效。
 
-用户权限使用固定 RBAC 角色：`admin` 拥有全部权限，`user` 可以使用共享业务功能和网盘搜索。当前版本保留公开注册，新用户默认获得 `user` 角色；业务数据仍然是共享数据，尚未按用户隔离。
+用户权限使用固定 RBAC 角色：`admin` 拥有全部权限，`user` 可以使用共享业务功能、网盘搜索和 Hermes 聊天。当前版本保留公开注册，新用户默认获得 `user` 角色；业务数据仍然是共享数据，Hermes 聊天会话按用户隔离保存。
 
-登录系统的完整设计和开发说明见 [`docs/auth-system.md`](docs/auth-system.md)。
+登录系统的完整设计和开发说明见 [`docs/auth-system.md`](docs/auth-system.md)。RBAC 的设计原理和授权逻辑见 [`docs/rbac-design.md`](docs/rbac-design.md)。
 
 如果配置了 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD`，启动时会自动创建或修正管理员账户。
 
@@ -74,9 +78,11 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
 - `GET /api/agents/hermes/status`，`POST /api/agents/hermes/start`，`POST /api/agents/hermes/stop`，管理员管理本地 Hermes Agent dashboard
+- `GET/POST /api/hermes-chat/conversations`，`GET/DELETE /api/hermes-chat/conversations/:id`，`POST /api/hermes-chat/conversations/:id/messages/stream`，`POST /api/hermes-chat/conversations/:id/messages/stop`，用户通过 SSE 使用 Orbit 自带 Hermes 聊天
 - `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/refresh`，`POST /api/auth/logout`，`GET /api/auth/me`
 - `GET /api/admin/users`，`PATCH /api/admin/users/:id/roles`，`PATCH /api/admin/users/:id/ban`，`DELETE /api/admin/users/:id`
 - `GET /api/admin/roles`，`GET /api/admin/permissions`
+- `GET /api/admin/hermes-chat/conversations`，`GET/DELETE /api/admin/hermes-chat/conversations/:id`，管理员查看和软删除 Hermes 聊天会话
 
 ## 网盘搜索
 
@@ -84,9 +90,11 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 
 ## Hermes Agent
 
-管理员可以在 Orbit 中查看并管理服务器本机 [Hermes Agent](https://github.com/NousResearch/hermes-agent) dashboard。Orbit 负责启动、停止、状态检查，并通过管理员登录态保护的代理入口打开 dashboard；模型、密钥、会话和聊天仍在 Hermes 自己的 dashboard 内管理。
+管理员可以在 Orbit 中查看并管理服务器本机 [Hermes Agent](https://github.com/NousResearch/hermes-agent) dashboard。Orbit 负责启动、停止、状态检查，并通过管理员登录态保护的代理入口打开 dashboard；模型和密钥仍在 Hermes 自己的配置内管理。
 
-默认使用 `HERMES_DASHBOARD_URL=http://127.0.0.1:9119` 和 `HERMES_DASHBOARD_PUBLIC_PATH=/hermes-dashboard`，启动命令为 `hermes dashboard --host 127.0.0.1 --port 9119 --no-open`。如果本机还没安装 Hermes，先按 Hermes 官方安装方式安装并完成配置。
+默认使用 `HERMES_DASHBOARD_URL=http://127.0.0.1:9119` 和 `HERMES_DASHBOARD_PUBLIC_PATH=/hermes-dashboard`，启动命令为 `hermes dashboard --host 127.0.0.1 --port 9119 --no-open`。聊天页由 Orbit 自己渲染，后端通过 `HERMES_STREAM_COMMAND` 在 Hermes 的 Python 运行时中启动私有 worker 池，把 Hermes `run_conversation` 的真实文本增量转换为 SSE，并为每个 Orbit 会话复用 Hermes Agent 和 session id。`HERMES_STREAM_COMMAND` 应指向安装 Hermes 的虚拟环境 Python，例如 `/path/to/hermes-agent/venv/bin/python -m backend.hermes_stream_bridge`；Orbit 会自动追加 `--worker`。如果本机还没安装 Hermes，先按 Hermes 官方安装方式安装并完成配置。
+
+流式聊天使用 `POST` + `text/event-stream`；Nginx 等反向代理需要关闭响应缓冲。用户可以停止生成，已生成的部分会以 `interrupted` 状态保存并显示“用户终止回答”。被动断线（例如手机浏览器切后台后连接被系统回收）不会停止 Hermes，Orbit 会在服务器后台继续消费并持久化最终回复；主动 Stop 使用独立 API 才会终止 worker。页面恢复或刷新后会根据会话的 `generating` 状态显示“正在思考”，每 2 秒检查一次，Hermes 完成落库后自动替换成最终回复。同一用户同时只允许一个生成任务。`HERMES_STREAM_POOL_SIZE` 默认为 2（范围 1–8），worker 最多缓存 16 个 Orbit 会话；正常完成后复用，主动停止、30 分钟超时或协议异常时销毁并补充 worker。池满时最多等待 `HERMES_STREAM_POOL_WAIT_TIMEOUT` 秒，默认 5 秒。`HERMES_CHAT_TIMEOUT=1800` 设置回答总时限为 30 分钟。
 
 生产环境中 Orbit 通过 systemd 运行时，可以把 Hermes 绑定到服务器本机端口，并让管理员通过 Orbit 的 `/hermes-dashboard/` 代理入口访问。当前服务器使用的 drop-in 形态如下：
 
@@ -96,6 +104,10 @@ Environment=HERMES_DASHBOARD_URL=http://127.0.0.1:9119
 Environment="HERMES_DASHBOARD_COMMAND=env HOME=/opt/orbit HERMES_HOME=/opt/orbit/.hermes /usr/local/bin/hermes dashboard --host 127.0.0.1 --port 9119 --no-open --skip-build"
 Environment="HERMES_DASHBOARD_STOP_COMMAND=env HOME=/opt/orbit HERMES_HOME=/opt/orbit/.hermes /usr/local/bin/hermes dashboard --stop"
 Environment=HERMES_DASHBOARD_TIMEOUT=5
+Environment="HERMES_STREAM_COMMAND=env HOME=/opt/orbit HERMES_HOME=/opt/orbit/.hermes /usr/local/lib/hermes-agent/venv/bin/python -m backend.hermes_stream_bridge"
+Environment=HERMES_STREAM_POOL_SIZE=2
+Environment=HERMES_STREAM_POOL_WAIT_TIMEOUT=5
+Environment=HERMES_CHAT_TIMEOUT=1800
 ```
 
 ## 后续适合扩展
