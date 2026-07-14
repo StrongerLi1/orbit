@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', loading: false, activeBookId: '', readers: null, bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -10,6 +10,9 @@ const netdiskSourceLabels = { baidu: '百度网盘', quark: '夸克网盘', aliy
 const hasPermission = (permission) => state.user?.permissions?.includes(permission);
 const canManageAccess = () => hasPermission('users:manage') || hasPermission('roles:manage');
 const canManageFolders = () => hasPermission('folders:manage');
+const canReadLibrary = () => hasPermission('library:read');
+const canUploadLibrary = () => hasPermission('library:upload');
+const canManageLibrary = () => hasPermission('library:manage');
 const canManageAgents = () => hasPermission('agents:manage');
 const canUseHermesChat = () => hasPermission('hermes:chat');
 
@@ -42,7 +45,9 @@ function planHistory(plan, until) {
 }
 
 async function request(url, options = {}, retry = true) {
-  const response = await fetch(url, { headers: { 'content-type': 'application/json' }, ...options });
+  const headers = new Headers(options.headers || {});
+  if (!(options.body instanceof FormData) && !headers.has('content-type')) headers.set('content-type', 'application/json');
+  const response = await fetch(url, { ...options, headers });
   const result = await response.json().catch(() => ({}));
   if (response.status === 401 && retry && !url.startsWith('/api/auth/login') && !url.startsWith('/api/auth/register') && !url.startsWith('/api/auth/refresh') && !url.startsWith('/api/auth/logout')) {
     const refreshed = await refreshAuth();
@@ -82,6 +87,7 @@ function showApp() {
   $('.app-shell').hidden = false;
   $('#user-chip').textContent = state.user ? `${state.user.username}${state.user.isAdmin ? ' · 管理员' : ''}` : '';
   $('#admin-nav').hidden = !canManageAccess();
+  $('#library-nav').hidden = !canReadLibrary();
   $('#hermes-chat-nav').hidden = !canUseHermesChat();
   $('#hermes-nav').hidden = !canManageAgents();
 }
@@ -141,7 +147,10 @@ function mountAuthCaptcha() {
 }
 
 async function load() {
-  [state.bookmarks, state.todos, state.plans, state.folders, state.excerpts] = await Promise.all(['bookmarks','todos','plans','folders','excerpts'].map((type) => request(`/api/${type}`)));
+  [state.bookmarks, state.todos, state.plans, state.folders, state.excerpts, state.library.books] = await Promise.all([
+    ...['bookmarks','todos','plans','folders','excerpts'].map((type) => request(`/api/${type}`)),
+    canReadLibrary() ? request('/api/library/books') : Promise.resolve([]),
+  ]);
   if (!state.excerpts.some((excerpt) => excerpt.id === state.featuredExcerptId)) chooseFeaturedExcerpt();
   render();
 }
@@ -188,10 +197,152 @@ function render() {
   $('#todos-active').innerHTML = activeTodos.map(todoHtml).join('') || empty('现在没有待办');
   $('#todos-completed').innerHTML = doneTodos.map(todoHtml).join('') || empty('完成的事项会出现在这里');
   $('#active-count').textContent = `${activeTodos.length} 项`;
+  renderLibrary();
   renderNetdisk();
   renderHermesChat();
   renderHermes();
   renderAdmin();
+}
+
+function libraryHue(value = '') {
+  return [...String(value)].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 360, 28);
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / 1024 / 1024).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function libraryBookHtml(book) {
+  const initial = (book.title || '书').trim().slice(0, 1);
+  const cover = book.hasCover ? `<img src="/api/library/books/${escapeHtml(book.id)}/cover" alt="${escapeHtml(book.title)} 封面" loading="lazy" onerror="this.remove()">` : '';
+  const manage = canManageLibrary() ? `<button data-library-edit="${escapeHtml(book.id)}">编辑</button><button class="library-danger" data-library-delete="${escapeHtml(book.id)}">删除</button>` : '';
+  return `<article class="library-card">
+    <div class="library-cover" style="--cover-hue:${libraryHue(book.title)}">${cover}<span class="library-cover-placeholder">${escapeHtml(initial)}</span><span class="library-format">${escapeHtml(String(book.fileFormat || '').toUpperCase())}</span></div>
+    <div class="library-card-body">
+      <div class="library-card-title"><h3>${escapeHtml(book.title)}</h3><span class="library-read-status ${book.currentUserRead ? 'read' : ''}">${book.currentUserRead ? `已读 ${book.currentUserReadCount} 次` : '未读'}</span></div>
+      <p class="library-author">${escapeHtml(book.author)}</p>
+      <div class="library-stats">${book.readerCount} 人读过 · 共阅读 ${book.readCount} 次</div>
+      <p class="library-uploaded">${formatFileSize(book.fileSize)} · ${escapeHtml(book.uploadedByName)} 上传</p>
+      <div class="library-card-actions">
+        <button class="library-record" data-library-record="${escapeHtml(book.id)}">记录阅读</button>
+        <button data-library-readers="${escapeHtml(book.id)}">读者</button>
+        <a href="/api/library/books/${escapeHtml(book.id)}/download">下载</a>
+        ${manage}
+      </div>
+    </div>
+  </article>`;
+}
+
+function renderLibrary() {
+  const grid = $('#library-grid');
+  if (!grid) return;
+  if (!canReadLibrary()) {
+    grid.innerHTML = empty('没有访问共享图书馆的权限');
+    return;
+  }
+  $$('#library-filters [data-library-filter]').forEach((button) => button.classList.toggle('active', button.dataset.libraryFilter === state.library.filter));
+  const upload = $('[data-library-upload]', $('#library .page-title'));
+  if (upload) upload.hidden = !canUploadLibrary();
+  const books = state.library.books.filter((book) => state.library.filter === 'all' || (state.library.filter === 'read' ? book.currentUserRead : !book.currentUserRead));
+  $('#library-count').textContent = `${books.length} / ${state.library.books.length} 本`;
+  grid.innerHTML = state.library.loading ? empty('正在加载图书馆…') : books.map(libraryBookHtml).join('') || empty(state.library.books.length ? '这个分类还没有书' : '图书馆还是空的，上传第一本书吧');
+}
+
+async function loadLibrary() {
+  if (!canReadLibrary()) return;
+  state.library.loading = true;
+  renderLibrary();
+  try {
+    state.library.books = await request('/api/library/books');
+  } finally {
+    state.library.loading = false;
+    renderLibrary();
+  }
+}
+
+function openLibraryBookModal(book = null) {
+  const form = $('#library-book-form');
+  form.reset();
+  delete form.elements.title.dataset.autoValue;
+  delete form.elements.author.dataset.autoValue;
+  delete form.elements.title.dataset.manualValue;
+  delete form.elements.author.dataset.manualValue;
+  state.library.bookMode = book ? 'edit' : 'upload';
+  state.library.editBookId = book?.id || '';
+  $('#library-book-label').textContent = book ? 'ADMIN EDIT' : 'UPLOAD';
+  $('#library-book-title').textContent = book ? '编辑书目信息' : '上传电子书';
+  form.elements.title.value = book?.title || '';
+  form.elements.author.value = book?.author || '';
+  form.elements.title.required = Boolean(book);
+  form.elements.author.required = Boolean(book);
+  $('#library-file-hint').textContent = '选择文件后会从文件名预填；上传时还会读取 EPUB/PDF 元数据，可随时修改。支持格式最大 100 MB';
+  $('#library-file-field').hidden = Boolean(book);
+  form.elements.bookFile.required = !book;
+  $('#library-remove-cover').hidden = !book?.hasCover;
+  $('#library-book-modal').hidden = false;
+  setTimeout(() => form.elements.title.focus(), 50);
+}
+
+function libraryMetadataFromFilename(filename = '') {
+  const stem = filename.replace(/\.[^.]+$/, '').replace(/\s+/g, ' ').trim();
+  if (!stem) return { title:'', author:'' };
+  const quoted = stem.match(/^《(.+?)》(?:\s*[-—–]\s*|\s+)(.+)$/);
+  if (quoted) return { title:quoted[1].trim(), author:quoted[2].trim() };
+  const separated = stem.match(/^(.+?)\s+[-—–]\s+(.+)$/);
+  if (separated) return { title:separated[1].trim(), author:separated[2].trim() };
+  return { title:stem, author:'' };
+}
+
+function setLibraryAutoField(input, value) {
+  if (input.dataset.manualValue !== 'true') input.value = value;
+  input.dataset.autoValue = value;
+}
+
+function openLibraryReadModal(bookId, record = null) {
+  state.library.readBookId = bookId;
+  state.library.editReadId = record?.id || '';
+  $('#library-read-title').textContent = record ? '修改阅读日期' : '记录一次阅读';
+  $('#library-read-form').elements.readDate.value = record?.readDate || dateKey();
+  $('#library-readers-modal').hidden = true;
+  $('#library-read-modal').hidden = false;
+  setTimeout(() => $('#library-read-form').elements.readDate.focus(), 50);
+}
+
+function renderLibraryReaders() {
+  const container = $('#library-readers-content');
+  const book = state.library.books.find((item) => item.id === state.library.activeBookId);
+  $('#library-readers-title').textContent = book ? `《${book.title}》的阅读记录` : '阅读记录';
+  const data = state.library.readers;
+  if (!data) {
+    container.innerHTML = empty('正在加载阅读记录…');
+    return;
+  }
+  container.innerHTML = data.readers.map((reader) => `<section class="library-reader">
+    <div class="library-reader-head"><strong>${escapeHtml(reader.username)}${reader.isCurrentUser ? ' · 我' : ''}</strong><span>${reader.reads.length} 次</span></div>
+    <div class="library-read-list">${reader.reads.map((record) => `<div class="library-read-row"><time datetime="${escapeHtml(record.readDate)}">${escapeHtml(record.readDate)}</time>${reader.isCurrentUser ? `<div class="library-read-actions"><button data-library-read-edit="${escapeHtml(record.id)}" data-book-id="${escapeHtml(state.library.activeBookId)}">修改</button><button class="danger" data-library-read-delete="${escapeHtml(record.id)}" data-book-id="${escapeHtml(state.library.activeBookId)}">删除</button></div>` : ''}</div>`).join('')}</div>
+  </section>`).join('') || empty('还没有人记录阅读');
+}
+
+async function openLibraryReaders(bookId) {
+  state.library.activeBookId = bookId;
+  state.library.readers = null;
+  $('#library-readers-modal').hidden = false;
+  renderLibraryReaders();
+  try {
+    state.library.readers = await request(`/api/library/books/${bookId}/reads`);
+    renderLibraryReaders();
+  } catch (error) {
+    $('#library-readers-content').innerHTML = `<div class="empty status-error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function closeLibraryModals() {
+  $('#library-book-modal').hidden = true;
+  $('#library-read-modal').hidden = true;
+  $('#library-readers-modal').hidden = true;
+  state.library.readers = null;
 }
 
 function renderHermes() {
@@ -770,6 +921,70 @@ document.addEventListener('click', async (event) => {
   const add = event.target.closest('[data-add]'); if (add) openModal(add.dataset.add);
   if (event.target.closest('#modal .close') || event.target === $('#modal')) closeModal();
   if (event.target.closest('#auth-captcha-modal .close') || event.target === $('#auth-captcha-modal')) closeAuthCaptcha();
+  if (event.target.closest('[data-library-close]') || ['library-book-modal','library-read-modal','library-readers-modal'].includes(event.target.id)) closeLibraryModals();
+  if (event.target.closest('[data-library-upload]')) {
+    if (!canUploadLibrary()) { toast('没有上传权限'); return; }
+    $('#quick-menu').hidden = true;
+    openLibraryBookModal();
+    return;
+  }
+  const libraryFilter = event.target.closest('[data-library-filter]');
+  if (libraryFilter) {
+    state.library.filter = libraryFilter.dataset.libraryFilter;
+    renderLibrary();
+    return;
+  }
+  const libraryRecord = event.target.closest('[data-library-record]');
+  if (libraryRecord) {
+    openLibraryReadModal(libraryRecord.dataset.libraryRecord);
+    return;
+  }
+  const libraryReaders = event.target.closest('[data-library-readers]');
+  if (libraryReaders) {
+    await openLibraryReaders(libraryReaders.dataset.libraryReaders);
+    return;
+  }
+  const libraryEdit = event.target.closest('[data-library-edit]');
+  if (libraryEdit) {
+    const book = state.library.books.find((item) => item.id === libraryEdit.dataset.libraryEdit);
+    if (!canManageLibrary() || !book) { toast('没有管理权限'); return; }
+    openLibraryBookModal(book);
+    return;
+  }
+  const libraryDelete = event.target.closest('[data-library-delete]');
+  if (libraryDelete) {
+    const book = state.library.books.find((item) => item.id === libraryDelete.dataset.libraryDelete);
+    if (!canManageLibrary() || !book) { toast('没有管理权限'); return; }
+    if (!confirm(`确定删除《${book.title}》吗？电子书、封面和全部阅读记录都会被删除。`)) return;
+    try {
+      await request(`/api/library/books/${book.id}`, { method:'DELETE' });
+      closeLibraryModals();
+      await loadLibrary();
+      toast('书籍已删除');
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  const libraryReadEdit = event.target.closest('[data-library-read-edit]');
+  if (libraryReadEdit) {
+    const record = state.library.readers?.readers.flatMap((reader) => reader.reads).find((item) => item.id === libraryReadEdit.dataset.libraryReadEdit);
+    if (record) openLibraryReadModal(libraryReadEdit.dataset.bookId, record);
+    return;
+  }
+  const libraryReadDelete = event.target.closest('[data-library-read-delete]');
+  if (libraryReadDelete) {
+    if (!confirm('确定删除这条阅读记录吗？')) return;
+    try {
+      await request(`/api/library/books/${libraryReadDelete.dataset.bookId}/reads/${libraryReadDelete.dataset.libraryReadDelete}`, { method:'DELETE' });
+      await loadLibrary();
+      await openLibraryReaders(libraryReadDelete.dataset.bookId);
+      toast('阅读记录已删除');
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
   const category = event.target.closest('[data-category]'); if (category) { state.category=category.dataset.category; render(); }
   if (event.target.closest('[data-folder-manage]')) { state.folderManaging = !state.folderManaging; render(); }
   const toggle = event.target.closest('[data-toggle]');
@@ -911,7 +1126,73 @@ $('#item-form').addEventListener('submit', async (event) => {
   if (payload.targetCount) payload.targetCount=Number(payload.targetCount);
   await mutate(()=>request(`/api/${type}`,{method:'POST',body:JSON.stringify(payload)}),'已添加'); closeModal();
 });
+$('#library-book-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  const data = new FormData(form);
+  const editing = state.library.bookMode === 'edit';
+  if (editing) data.delete('bookFile');
+  if (!editing) {
+    ['title', 'author'].forEach((name) => {
+      const input = form.elements[name];
+      if (input.dataset.manualValue !== 'true') data.set(name, '');
+    });
+  }
+  button.disabled = true;
+  button.textContent = editing ? '正在保存…' : '正在上传…';
+  try {
+    const path = editing ? `/api/library/books/${state.library.editBookId}` : '/api/library/books';
+    await request(path, { method:editing ? 'PATCH' : 'POST', body:data });
+    closeLibraryModals();
+    await loadLibrary();
+    toast(editing ? '书目信息已更新' : '电子书已上传');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = '保存';
+  }
+});
+$('#library-read-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  const readDate = form.elements.readDate.value;
+  const bookId = state.library.readBookId;
+  const readId = state.library.editReadId;
+  const returnToReaders = Boolean(state.library.readers);
+  button.disabled = true;
+  try {
+    const path = readId ? `/api/library/books/${bookId}/reads/${readId}` : `/api/library/books/${bookId}/reads`;
+    await request(path, { method:readId ? 'PATCH' : 'POST', body:JSON.stringify({ readDate }) });
+    $('#library-read-modal').hidden = true;
+    await loadLibrary();
+    if (returnToReaders) await openLibraryReaders(bookId);
+    toast(readId ? '阅读日期已更新' : '已记录这次阅读');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+document.addEventListener('input', (event) => {
+  const metadataInput = event.target.closest('#library-book-form [name="title"], #library-book-form [name="author"]');
+  if (metadataInput && state.library.bookMode === 'upload') metadataInput.dataset.manualValue = 'true';
+});
 document.addEventListener('change', async (event) => {
+  const libraryFile = event.target.closest('#library-book-form [name="bookFile"]');
+  if (libraryFile) {
+    const file = libraryFile.files?.[0];
+    const metadata = libraryMetadataFromFilename(file?.name || '');
+    const form = $('#library-book-form');
+    setLibraryAutoField(form.elements.title, metadata.title);
+    setLibraryAutoField(form.elements.author, metadata.author);
+    $('#library-file-hint').textContent = file
+      ? '已从文件名预填。你可以直接修改；未修改的值会在上传时优先使用文件内元数据。'
+      : '选择文件后会从文件名预填；上传时还会读取 EPUB/PDF 元数据，可随时修改。支持格式最大 100 MB';
+    return;
+  }
   const roleInput = event.target.closest('[data-user-role]');
   if (roleInput) {
     const row = roleInput.closest('[data-role-user]');
@@ -1000,7 +1281,7 @@ $('#hermes-chat-form button').addEventListener('click', (event) => {
   event.preventDefault();
   void stopHermesChatMessage();
 });
-document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape'){closeModal();closeAuthCaptcha();} });
+document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape'){closeModal();closeAuthCaptcha();closeLibraryModals();} });
 window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));
 async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
 async function saveFolderOrder(draggedId, targetId) {
@@ -1022,7 +1303,7 @@ async function saveFolderOrder(draggedId, targetId) {
     toast(error.message);
   }
 }
-function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}if(id==='hermes-chat'&&!canUseHermesChat()){id='dashboard';toast('没有 Hermes 聊天权限')}if(id==='hermes'&&!canManageAgents()){id='dashboard';toast('没有访问智能体管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();if(id==='hermes-chat')loadHermesChat();if(id==='hermes')loadHermes();}
+function showPage(id){if(!state.user){showAuth('login');return}if(!$('#'+id))id='dashboard';if(id==='admin'&&!canManageAccess()){id='dashboard';toast('没有访问用户管理的权限')}if(id==='library'&&!canReadLibrary()){id='dashboard';toast('没有访问共享图书馆的权限')}if(id==='hermes-chat'&&!canUseHermesChat()){id='dashboard';toast('没有 Hermes 聊天权限')}if(id==='hermes'&&!canManageAgents()){id='dashboard';toast('没有访问智能体管理的权限')}$$('.page').forEach((p)=>p.classList.toggle('active',p.id===id));$$('.nav-link').forEach((a)=>a.classList.toggle('active',a.dataset.page===id));$('.sidebar').classList.remove('open');if(id==='admin')loadAdmin();if(id==='library'&&!state.library.books.length)loadLibrary();if(id==='hermes-chat')loadHermesChat();if(id==='hermes')loadHermes();}
 
 async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;

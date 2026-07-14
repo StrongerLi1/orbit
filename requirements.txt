@@ -1,4 +1,6 @@
 fastapi==0.115.6
+python-multipart==0.0.20
+pypdf==6.14.2
 uvicorn[standard]==0.34.0
 pymysql==1.1.1
 redis==5.2.1

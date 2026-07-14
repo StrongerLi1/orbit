@@ -26,6 +26,9 @@ PERMISSIONS = {
     "content:write": "新增、修改和删除共享业务数据",
     "netdisk:search": "使用网盘搜索",
     "folders:manage": "管理收藏夹标签",
+    "library:read": "查看和下载共享图书馆内容",
+    "library:upload": "上传共享图书馆书籍",
+    "library:manage": "编辑和删除共享图书馆书籍",
     "hermes:chat": "使用 Hermes 聊天",
     "agents:manage": "管理本地智能体服务",
     "users:manage": "管理用户和用户角色",
@@ -39,7 +42,14 @@ ROLES = {
     },
     "user": {
         "description": "普通用户，可使用共享业务功能",
-        "permissions": ("content:read", "content:write", "netdisk:search", "hermes:chat"),
+        "permissions": (
+            "content:read",
+            "content:write",
+            "netdisk:search",
+            "library:read",
+            "library:upload",
+            "hermes:chat",
+        ),
     },
 }
 
@@ -212,6 +222,7 @@ def delete_user_account(user_id: str) -> dict[str, bool]:
     _ensure_non_admin_target(user_id)
     with connection() as conn:
         with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM book_reads WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
     return {"ok": True}

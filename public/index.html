@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260710-hermes-sse">
+  <link rel="stylesheet" href="/styles.css?v=20260714-library-metadata">
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -39,6 +39,7 @@
       <nav>
         <a class="nav-link active" href="#dashboard" data-page="dashboard"><span>⌂</span>概览</a>
         <a class="nav-link" href="#bookmarks" data-page="bookmarks"><span>◇</span>收藏夹</a>
+        <a class="nav-link" href="#library" data-page="library" id="library-nav" hidden><span>▤</span>共享图书馆</a>
         <a class="nav-link" href="#netdisk" data-page="netdisk"><span>⌕</span>网盘搜索</a>
         <a class="nav-link" href="#excerpts" data-page="excerpts"><span>“</span>摘录</a>
         <a class="nav-link" href="#plans" data-page="plans"><span>◷</span>日常计划</a>
@@ -101,6 +102,19 @@
           <div class="page-title"><div><p class="eyebrow">YOUR COLLECTION</p><h1>收藏夹</h1><p>把散落在网络里的好东西放在这里。</p></div><button class="primary" data-add="bookmarks">＋ 添加网站</button></div>
           <div class="filters" id="bookmarks-filters"><button class="filter active" data-category="全部">全部</button><div id="category-filters"></div><button class="tag-manage" id="folder-manage" data-folder-manage hidden>管理标签</button><button class="new-folder" data-add="folders">＋ 新建收藏夹</button></div>
           <div id="bookmarks-grid" class="bookmarks-grid"></div>
+        </section>
+
+        <section class="page" id="library">
+          <div class="page-title"><div><p class="eyebrow">SHARED LIBRARY</p><h1>共享图书馆</h1><p>一起收藏值得读的书，也留下每一次阅读。</p></div><button class="primary" data-library-upload>＋ 上传电子书</button></div>
+          <div class="library-toolbar">
+            <div class="filters" id="library-filters">
+              <button class="filter active" data-library-filter="all">全部</button>
+              <button class="filter" data-library-filter="unread">我的未读</button>
+              <button class="filter" data-library-filter="read">我的已读</button>
+            </div>
+            <span class="library-count" id="library-count"></span>
+          </div>
+          <div id="library-grid" class="library-grid"></div>
         </section>
 
         <section class="page" id="netdisk">
@@ -206,10 +220,38 @@
       <p class="auth-captcha-status" id="auth-captcha-status"></p>
     </div>
   </div>
-  <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
+  <div class="modal-backdrop" id="library-book-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="library-book-title">
+      <div class="modal-head"><div><span class="label" id="library-book-label">UPLOAD</span><h2 id="library-book-title">上传电子书</h2></div><button class="close" data-library-close aria-label="关闭">×</button></div>
+      <form id="library-book-form">
+        <div class="field"><label>书名（可自动识别）</label><input name="title" maxlength="300" placeholder="例如：百年孤独"></div>
+        <div class="field"><label>作者（可自动识别）</label><input name="author" maxlength="200" placeholder="例如：加西亚·马尔克斯"></div>
+        <div class="field" id="library-file-field"><label>电子书文件</label><input name="bookFile" type="file" required accept=".epub,.pdf,.mobi,.azw3,.txt"><small id="library-file-hint">选择文件后会从文件名预填；上传时还会读取 EPUB/PDF 元数据，可随时修改。支持格式最大 100 MB</small></div>
+        <div class="field"><label>封面（可选）</label><input name="coverFile" type="file" accept="image/jpeg,image/png,image/webp"><small>支持 JPEG、PNG、WebP，最大 5 MB</small></div>
+        <label class="library-remove-cover" id="library-remove-cover" hidden><input name="removeCover" type="checkbox" value="true"> 移除现有封面</label>
+        <div class="form-actions"><button type="button" class="secondary" data-library-close>取消</button><button type="submit" class="primary">保存</button></div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="library-read-modal" hidden>
+    <div class="modal library-read-modal" role="dialog" aria-modal="true" aria-labelledby="library-read-title">
+      <div class="modal-head"><div><span class="label">READING HISTORY</span><h2 id="library-read-title">记录一次阅读</h2></div><button class="close" data-library-close aria-label="关闭">×</button></div>
+      <form id="library-read-form">
+        <div class="field"><label>阅读日期</label><input name="readDate" type="date" required></div>
+        <div class="form-actions"><button type="button" class="secondary" data-library-close>取消</button><button type="submit" class="primary">保存记录</button></div>
+      </form>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="library-readers-modal" hidden>
+    <div class="modal library-readers-modal" role="dialog" aria-modal="true" aria-labelledby="library-readers-title">
+      <div class="modal-head"><div><span class="label">READERS</span><h2 id="library-readers-title">阅读记录</h2></div><button class="close" data-library-close aria-label="关闭">×</button></div>
+      <div id="library-readers-content" class="library-readers-content"></div>
+    </div>
+  </div>
+  <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-library-upload>▤ 上传电子书</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20260710-hermes-sse-pacing"></script>
+  <script src="/app.js?v=20260714-library-metadata"></script>
 </body>
 </html>

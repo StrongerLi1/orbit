@@ -157,6 +157,40 @@ def initialize_database() -> None:
             )
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS books (
+                    id VARCHAR(64) PRIMARY KEY,
+                    title VARCHAR(300) NOT NULL,
+                    author VARCHAR(200) NOT NULL,
+                    file_format VARCHAR(20) NOT NULL,
+                    original_filename VARCHAR(300) NOT NULL,
+                    stored_filename VARCHAR(120) NOT NULL,
+                    file_size BIGINT NOT NULL,
+                    cover_filename VARCHAR(120) NOT NULL DEFAULT '',
+                    cover_content_type VARCHAR(80) NOT NULL DEFAULT '',
+                    uploaded_by VARCHAR(64) NOT NULL,
+                    uploaded_by_name VARCHAR(64) NOT NULL,
+                    created_at VARCHAR(40) NOT NULL,
+                    updated_at VARCHAR(40) NOT NULL,
+                    INDEX idx_books_created (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS book_reads (
+                    id VARCHAR(64) PRIMARY KEY,
+                    book_id VARCHAR(64) NOT NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    read_date VARCHAR(20) NOT NULL,
+                    created_at VARCHAR(40) NOT NULL,
+                    updated_at VARCHAR(40) NOT NULL,
+                    INDEX idx_book_reads_book_user_date (book_id, user_id, read_date),
+                    INDEX idx_book_reads_user_book (user_id, book_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS hermes_conversations (
                     id VARCHAR(64) PRIMARY KEY,
                     user_id VARCHAR(64) NOT NULL,

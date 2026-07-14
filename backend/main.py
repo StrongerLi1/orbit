@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 from pathlib import Path
 import json
 import logging
@@ -11,11 +12,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any
 from urllib.parse import urlparse
 
 import websockets
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketDisconnect
@@ -46,22 +48,46 @@ from .auth import (
 from .config import PUBLIC_DIR, settings
 from .database import COLLECTIONS, initialize_database
 from .hermes_stream_pool import HermesStreamLease, HermesStreamPool
+from .library_files import (
+    BOOK_CONTENT_TYPES,
+    book_path,
+    clean_download_name,
+    cover_path,
+    detect_book_format,
+    detect_cover,
+    ensure_library_storage,
+    extract_book_metadata,
+    move_into_place,
+    remove_file,
+    save_upload,
+    temporary_path,
+)
 from .repository import (
+    create_book,
+    create_book_read,
     create_item,
+    delete_book,
+    delete_book_read,
     delete_item,
     folder_exists,
     folder_has_bookmarks,
     add_hermes_message,
     create_hermes_conversation,
     get_hermes_conversation,
+    get_book,
+    get_book_storage,
     get_item,
     list_admin_hermes_conversations,
     list_hermes_conversations,
     list_hermes_messages,
+    list_book_reads,
+    list_books,
     list_items,
     hermes_chat_user_lock,
     soft_delete_hermes_conversation,
     update_hermes_conversation_after_message,
+    update_book,
+    update_book_read,
     update_item,
 )
 
@@ -77,6 +103,7 @@ _hermes_background_tasks: set[asyncio.Task] = set()
 @app.on_event("startup")
 async def startup() -> None:
     initialize_database()
+    ensure_library_storage()
     await _warm_hermes_stream_pool()
 
 
@@ -1152,6 +1179,277 @@ def admin_roles(request: Request):
 def admin_permissions(request: Request):
     require_permission(request, "roles:manage")
     return list_permissions()
+
+
+def _library_metadata(title: str, author: str, extracted: dict[str, Any] | None = None) -> tuple[str, str]:
+    fallback = extracted or {}
+    clean_title = (str(title or "").strip() or str(fallback.get("title") or "").strip())[:300]
+    clean_author = (str(author or "").strip() or str(fallback.get("author") or "").strip())[:200]
+    if not clean_title:
+        detail = "书名不能为空" if extracted is None else "未能识别书名，请手动填写"
+        raise HTTPException(status_code=422, detail=detail)
+    if not clean_author:
+        detail = "作者不能为空" if extracted is None else "未能识别作者，请手动填写"
+        raise HTTPException(status_code=422, detail=detail)
+    return clean_title, clean_author
+
+
+def _library_date(value: Any) -> str:
+    candidate = str(value or "").strip()
+    try:
+        parsed = date.fromisoformat(candidate)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="请输入有效阅读日期") from error
+    if parsed.isoformat() != candidate:
+        raise HTTPException(status_code=422, detail="请输入有效阅读日期")
+    return candidate
+
+
+def _library_book_or_404(book_id: str, user_id: str) -> dict[str, Any]:
+    book = get_book(book_id, user_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return book
+
+
+@app.get("/api/library/books")
+def library_books(request: Request):
+    user = require_permission(request, "library:read")
+    return list_books(user["id"])
+
+
+@app.post("/api/library/books", status_code=201)
+async def library_upload_book(
+    request: Request,
+    title: str = Form(""),
+    author: str = Form(""),
+    book_file: UploadFile = File(..., alias="bookFile"),
+    cover_file: UploadFile | None = File(None, alias="coverFile"),
+):
+    user = require_permission(request, "library:upload")
+    original_filename = book_file.filename or ""
+    book_id = str(uuid.uuid4())
+    book_temp = temporary_path()
+    cover_temp: Path | None = None
+    final_book: Path | None = None
+    final_cover: Path | None = None
+    try:
+        file_size = await save_upload(
+            book_file,
+            book_temp,
+            settings.library_max_file_mb * 1024 * 1024,
+            "电子书",
+        )
+        file_format = detect_book_format(book_temp, original_filename)
+        extracted = extract_book_metadata(
+            book_temp,
+            original_filename,
+            file_format,
+            settings.library_max_cover_mb * 1024 * 1024,
+        )
+        clean_title, clean_author = _library_metadata(title, author, extracted)
+        stored_filename = f"{book_id}.{file_format}"
+        final_book = book_path(stored_filename)
+
+        cover_filename = ""
+        cover_content_type = ""
+        if cover_file is not None and cover_file.filename:
+            cover_temp = temporary_path()
+            await save_upload(
+                cover_file,
+                cover_temp,
+                settings.library_max_cover_mb * 1024 * 1024,
+                "封面",
+            )
+            cover_extension, cover_content_type = detect_cover(cover_temp)
+            cover_filename = f"{book_id}.{cover_extension}"
+            final_cover = cover_path(cover_filename)
+        else:
+            if cover_file is not None:
+                await cover_file.close()
+            if extracted.get("coverBytes"):
+                cover_temp = temporary_path()
+                cover_temp.write_bytes(extracted["coverBytes"])
+                cover_extension = extracted["coverExtension"]
+                cover_content_type = extracted["coverContentType"]
+                cover_filename = f"{book_id}.{cover_extension}"
+                final_cover = cover_path(cover_filename)
+
+        move_into_place(book_temp, final_book)
+        if cover_temp is not None and final_cover is not None:
+            move_into_place(cover_temp, final_cover)
+        return create_book(
+            {
+                "id": book_id,
+                "title": clean_title,
+                "author": clean_author,
+                "fileFormat": file_format,
+                "originalFilename": clean_download_name(original_filename, clean_title, file_format),
+                "storedFilename": stored_filename,
+                "fileSize": file_size,
+                "coverFilename": cover_filename,
+                "coverContentType": cover_content_type,
+                "uploadedByName": user["username"],
+            },
+            user["id"],
+        )
+    except Exception:
+        remove_file(final_book)
+        remove_file(final_cover)
+        raise
+    finally:
+        if cover_file is not None:
+            await cover_file.close()
+        remove_file(book_temp)
+        remove_file(cover_temp)
+
+
+@app.patch("/api/library/books/{book_id}")
+async def library_update_book(
+    book_id: str,
+    request: Request,
+    title: str = Form(...),
+    author: str = Form(...),
+    remove_cover: bool = Form(False, alias="removeCover"),
+    cover_file: UploadFile | None = File(None, alias="coverFile"),
+):
+    user = require_permission(request, "library:manage")
+    clean_title, clean_author = _library_metadata(title, author)
+    existing = get_book_storage(book_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    cover_temp: Path | None = None
+    new_cover: Path | None = None
+    old_cover = cover_path(existing["cover_filename"]) if existing["cover_filename"] else None
+    cover_filename = "" if remove_cover else existing["cover_filename"]
+    cover_content_type = "" if remove_cover else existing["cover_content_type"]
+    try:
+        if cover_file is not None and cover_file.filename:
+            cover_temp = temporary_path()
+            await save_upload(
+                cover_file,
+                cover_temp,
+                settings.library_max_cover_mb * 1024 * 1024,
+                "封面",
+            )
+            extension, cover_content_type = detect_cover(cover_temp)
+            cover_filename = f"{book_id}-{uuid.uuid4().hex[:12]}.{extension}"
+            new_cover = cover_path(cover_filename)
+            move_into_place(cover_temp, new_cover)
+        elif cover_file is not None:
+            await cover_file.close()
+        updated = update_book(
+            book_id,
+            user["id"],
+            clean_title,
+            clean_author,
+            cover_filename,
+            cover_content_type,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="书籍不存在")
+        if old_cover is not None and old_cover != new_cover and (remove_cover or new_cover is not None):
+            remove_file(old_cover)
+        return updated
+    except Exception:
+        remove_file(new_cover)
+        raise
+    finally:
+        remove_file(cover_temp)
+
+
+@app.delete("/api/library/books/{book_id}")
+def library_delete_book(book_id: str, request: Request):
+    require_permission(request, "library:manage")
+    existing = get_book_storage(book_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    paths = [book_path(existing["stored_filename"])]
+    if existing["cover_filename"]:
+        paths.append(cover_path(existing["cover_filename"]))
+    staged: list[tuple[Path, Path]] = []
+    try:
+        for original in paths:
+            if not original.is_file():
+                continue
+            temporary = temporary_path()
+            move_into_place(original, temporary)
+            staged.append((original, temporary))
+        deleted = delete_book(book_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="书籍不存在")
+    except Exception:
+        for original, temporary in reversed(staged):
+            if temporary.exists():
+                move_into_place(temporary, original)
+        raise
+    for _, temporary in staged:
+        remove_file(temporary)
+    return {"ok": True}
+
+
+@app.get("/api/library/books/{book_id}/download")
+def library_download_book(book_id: str, request: Request):
+    require_permission(request, "library:read")
+    book = get_book_storage(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    path = book_path(book["stored_filename"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(
+        path,
+        media_type=BOOK_CONTENT_TYPES.get(book["file_format"], "application/octet-stream"),
+        filename=clean_download_name(book["original_filename"], book["title"], book["file_format"]),
+        content_disposition_type="attachment",
+    )
+
+
+@app.get("/api/library/books/{book_id}/cover")
+def library_book_cover(book_id: str, request: Request):
+    require_permission(request, "library:read")
+    book = get_book_storage(book_id)
+    if not book or not book["cover_filename"]:
+        raise HTTPException(status_code=404, detail="封面不存在")
+    path = cover_path(book["cover_filename"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="封面不存在")
+    return FileResponse(path, media_type=book["cover_content_type"])
+
+
+@app.get("/api/library/books/{book_id}/reads")
+def library_book_reads(book_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    return list_book_reads(book_id, user["id"])
+
+
+@app.post("/api/library/books/{book_id}/reads", status_code=201)
+async def library_create_read(book_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    data = await request.json()
+    return create_book_read(book_id, user["id"], _library_date(data.get("readDate")))
+
+
+@app.patch("/api/library/books/{book_id}/reads/{read_id}")
+async def library_update_read(book_id: str, read_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    data = await request.json()
+    updated = update_book_read(book_id, read_id, user["id"], _library_date(data.get("readDate")))
+    if not updated:
+        raise HTTPException(status_code=404, detail="阅读记录不存在")
+    return updated
+
+
+@app.delete("/api/library/books/{book_id}/reads/{read_id}")
+def library_delete_read(book_id: str, read_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    if not delete_book_read(book_id, read_id, user["id"]):
+        raise HTTPException(status_code=404, detail="阅读记录不存在")
+    return {"ok": True}
 
 
 @app.get("/api/{collection}")

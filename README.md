@@ -29,6 +29,9 @@ export MYSQL_USER=orbit
 export MYSQL_PASSWORD=orbit_password
 export MYSQL_DATABASE=orbit
 export PANSOU_BASE_URL=http://127.0.0.1:8888
+export LIBRARY_STORAGE_DIR=/path/to/private/orbit-library
+export LIBRARY_MAX_FILE_MB=100
+export LIBRARY_MAX_COVER_MB=5
 export HERMES_DASHBOARD_URL=http://127.0.0.1:9119
 export HERMES_DASHBOARD_PUBLIC_PATH=/hermes-dashboard
 export HERMES_STREAM_COMMAND="/path/to/hermes-agent/venv/bin/python -m backend.hermes_stream_bridge"
@@ -77,6 +80,11 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/folders`，`PATCH/DELETE /api/folders/:id`
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
+- `GET/POST /api/library/books`，共享图书目录与电子书上传
+- `PATCH/DELETE /api/library/books/:id`，管理员编辑或删除共享书籍
+- `GET /api/library/books/:id/download`，认证下载原始电子书
+- `GET/POST /api/library/books/:id/reads`，查看或新增多次阅读记录
+- `PATCH/DELETE /api/library/books/:id/reads/:readId`，用户修改或删除自己的阅读记录
 - `GET /api/agents/hermes/status`，`POST /api/agents/hermes/start`，`POST /api/agents/hermes/stop`，管理员管理本地 Hermes Agent dashboard
 - `GET/POST /api/hermes-chat/conversations`，`GET/DELETE /api/hermes-chat/conversations/:id`，`POST /api/hermes-chat/conversations/:id/messages/stream`，`POST /api/hermes-chat/conversations/:id/messages/stop`，用户通过 SSE 使用 Orbit 自带 Hermes 聊天
 - `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/refresh`，`POST /api/auth/logout`，`GET /api/auth/me`
@@ -87,6 +95,10 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 ## 网盘搜索
 
 网盘搜索模块接入 [PanSou](https://github.com/fish2018/pansou) 的 `/api/search?kw=` 接口。推荐在服务器本机运行 PanSou 后端，并把 `PANSOU_BASE_URL` 指向 `http://127.0.0.1:8888`。
+
+## 共享图书馆
+
+登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF 内嵌元数据，最后从文件名回退；EPUB 还可提取内嵌封面。所有用户都能记录多次阅读日期并查看读者历史；只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
 
 ## Hermes Agent
 

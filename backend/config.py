@@ -21,6 +21,9 @@ class Settings:
     pansou_base_url = os.getenv("PANSOU_BASE_URL") or os.getenv("LIMITLESS_SEARCH_BASE_URL", "http://127.0.0.1:8888")
     pansou_base_url = pansou_base_url.rstrip("/")
     pansou_timeout = float(os.getenv("PANSOU_TIMEOUT") or os.getenv("LIMITLESS_SEARCH_TIMEOUT", "12"))
+    library_storage_dir = Path(os.getenv("LIBRARY_STORAGE_DIR", str(BASE_DIR / "data" / "library"))).expanduser()
+    library_max_file_mb = max(1, int(os.getenv("LIBRARY_MAX_FILE_MB", "100")))
+    library_max_cover_mb = max(1, int(os.getenv("LIBRARY_MAX_COVER_MB", "5")))
     hermes_dashboard_url = os.getenv("HERMES_DASHBOARD_URL", "http://127.0.0.1:9119").rstrip("/")
     hermes_dashboard_public_path = os.getenv("HERMES_DASHBOARD_PUBLIC_PATH", "/hermes-dashboard").rstrip("/") or "/hermes-dashboard"
     hermes_dashboard_command = os.getenv("HERMES_DASHBOARD_COMMAND", "hermes dashboard --host 127.0.0.1 --port 9119 --no-open")

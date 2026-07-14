@@ -302,3 +302,232 @@ def soft_delete_hermes_conversation(conversation_id: str, user_id: str | None = 
         with conn.cursor() as cursor:
             cursor.execute(f"UPDATE hermes_conversations SET deleted_at = %s WHERE {where}", params)
             return {"ok": cursor.rowcount > 0}
+
+
+def _book_row(row: dict[str, Any]) -> dict[str, Any]:
+    current_user_read_count = int(row.get("current_user_read_count") or 0)
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "author": row["author"],
+        "fileFormat": row["file_format"],
+        "originalFilename": row["original_filename"],
+        "fileSize": int(row["file_size"]),
+        "hasCover": bool(row.get("cover_filename")),
+        "uploadedByName": row["uploaded_by_name"],
+        "readerCount": int(row.get("reader_count") or 0),
+        "readCount": int(row.get("read_count") or 0),
+        "currentUserReadCount": current_user_read_count,
+        "currentUserRead": current_user_read_count > 0,
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def list_books(user_id: str) -> list[dict[str, Any]]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT b.*,
+                    COALESCE(stats.reader_count, 0) AS reader_count,
+                    COALESCE(stats.read_count, 0) AS read_count,
+                    COALESCE(mine.current_user_read_count, 0) AS current_user_read_count
+                FROM books b
+                LEFT JOIN (
+                    SELECT book_id, COUNT(DISTINCT user_id) AS reader_count, COUNT(*) AS read_count
+                    FROM book_reads
+                    GROUP BY book_id
+                ) stats ON stats.book_id = b.id
+                LEFT JOIN (
+                    SELECT book_id, COUNT(*) AS current_user_read_count
+                    FROM book_reads
+                    WHERE user_id = %s
+                    GROUP BY book_id
+                ) mine ON mine.book_id = b.id
+                ORDER BY b.created_at DESC
+                """,
+                (user_id,),
+            )
+            return [_book_row(row) for row in cursor.fetchall()]
+
+
+def get_book(book_id: str, user_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT b.*,
+                    (SELECT COUNT(DISTINCT r.user_id) FROM book_reads r WHERE r.book_id = b.id) AS reader_count,
+                    (SELECT COUNT(*) FROM book_reads r WHERE r.book_id = b.id) AS read_count,
+                    (SELECT COUNT(*) FROM book_reads r WHERE r.book_id = b.id AND r.user_id = %s) AS current_user_read_count
+                FROM books b
+                WHERE b.id = %s
+                """,
+                (user_id, book_id),
+            )
+            row = cursor.fetchone()
+            return _book_row(row) if row else None
+
+
+def get_book_storage(book_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM books WHERE id = %s", (book_id,))
+            return cursor.fetchone()
+
+
+def create_book(book: dict[str, Any], user_id: str) -> dict[str, Any]:
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO books
+                    (id, title, author, file_format, original_filename, stored_filename,
+                     file_size, cover_filename, cover_content_type, uploaded_by,
+                     uploaded_by_name, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    book["id"], book["title"], book["author"], book["fileFormat"],
+                    book["originalFilename"], book["storedFilename"], book["fileSize"],
+                    book.get("coverFilename", ""), book.get("coverContentType", ""),
+                    user_id, book["uploadedByName"], created_at, created_at,
+                ),
+            )
+    result = get_book(book["id"], user_id)
+    if result is None:
+        raise RuntimeError("Book was not created")
+    return result
+
+
+def update_book(
+    book_id: str,
+    user_id: str,
+    title: str,
+    author: str,
+    cover_filename: str,
+    cover_content_type: str,
+) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE books
+                SET title = %s, author = %s, cover_filename = %s,
+                    cover_content_type = %s, updated_at = %s
+                WHERE id = %s
+                """,
+                (title, author, cover_filename, cover_content_type, now_iso(), book_id),
+            )
+    return get_book(book_id, user_id)
+
+
+def delete_book(book_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        conn.begin()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM books WHERE id = %s FOR UPDATE", (book_id,))
+                book = cursor.fetchone()
+                if not book:
+                    conn.rollback()
+                    return None
+                cursor.execute("DELETE FROM book_reads WHERE book_id = %s", (book_id,))
+                cursor.execute("DELETE FROM books WHERE id = %s", (book_id,))
+            conn.commit()
+            return book
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def list_book_reads(book_id: str, current_user_id: str) -> dict[str, Any]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT r.id, r.user_id, r.read_date, r.created_at, r.updated_at, u.username
+                FROM book_reads r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.book_id = %s
+                ORDER BY u.username ASC, r.read_date DESC, r.created_at DESC
+                """,
+                (book_id,),
+            )
+            rows = cursor.fetchall()
+    readers: list[dict[str, Any]] = []
+    by_user: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        reader = by_user.get(row["user_id"])
+        if reader is None:
+            reader = {
+                "username": row["username"],
+                "isCurrentUser": row["user_id"] == current_user_id,
+                "reads": [],
+            }
+            by_user[row["user_id"]] = reader
+            readers.append(reader)
+        reader["reads"].append({
+            "id": row["id"],
+            "readDate": row["read_date"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        })
+    return {"readerCount": len(readers), "readCount": len(rows), "readers": readers}
+
+
+def create_book_read(book_id: str, user_id: str, read_date: str) -> dict[str, Any]:
+    read_id = str(uuid.uuid4())
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO book_reads (id, book_id, user_id, read_date, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (read_id, book_id, user_id, read_date, created_at, created_at),
+            )
+    return {"id": read_id, "readDate": read_date, "createdAt": created_at, "updatedAt": created_at}
+
+
+def update_book_read(book_id: str, read_id: str, user_id: str, read_date: str) -> dict[str, Any] | None:
+    updated_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE book_reads SET read_date = %s, updated_at = %s
+                WHERE id = %s AND book_id = %s AND user_id = %s
+                """,
+                (read_date, updated_at, read_id, book_id, user_id),
+            )
+            cursor.execute(
+                """
+                SELECT id, read_date, created_at, updated_at
+                FROM book_reads
+                WHERE id = %s AND book_id = %s AND user_id = %s
+                """,
+                (read_id, book_id, user_id),
+            )
+            row = cursor.fetchone()
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "readDate": row["read_date"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def delete_book_read(book_id: str, read_id: str, user_id: str) -> bool:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM book_reads WHERE id = %s AND book_id = %s AND user_id = %s",
+                (read_id, book_id, user_id),
+            )
+            return cursor.rowcount > 0
