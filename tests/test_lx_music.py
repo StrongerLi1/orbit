@@ -52,6 +52,9 @@ def main() -> None:
     assert "location ^~ /_orbit_lx_admin" not in nginx
     assert "0d653bf31b19635dd20299c5b341630b426c79f3" in dockerfile
     assert "ws@8.21.0" in dockerfile
+    assert "mkdir -p /server/cache /server/cover_cache /server/music" in dockerfile
+    assert "touch /server/debug.txt" in dockerfile
+    assert "chown 10001:10001" in dockerfile
 
 
 if __name__ == "__main__":

@@ -34,6 +34,9 @@ RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories
     && addgroup -S -g 10001 lx \
     && adduser -S -D -H -u 10001 -G lx lx
 COPY --from=builder --chown=10001:10001 /build-output/ ./
+RUN mkdir -p /server/cache /server/cover_cache /server/music \
+    && touch /server/debug.txt \
+    && chown 10001:10001 /server/cache /server/cover_cache /server/music /server/debug.txt
 
 ENV NODE_ENV=production \
     PORT=9527 \
