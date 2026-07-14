@@ -691,3 +691,36 @@ Implemented, fixed, deployed, and verified Orbit-native Hermes chat with user-ow
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Shared ebook library
+
+**Date**: 2026-07-14
+**Task**: Shared ebook library
+**Branch**: `main`
+
+### Summary
+
+Implemented and deployed a shared ebook library with per-user reading history, admin catalog management, filename and EPUB/PDF metadata extraction, and embedded EPUB cover support.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `96644ae` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
