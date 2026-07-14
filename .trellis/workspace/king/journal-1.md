@@ -724,3 +724,70 @@ Implemented and deployed a shared ebook library with per-user reading history, a
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Integrate and deploy LX Music
+
+**Date**: 2026-07-14
+**Task**: Integrate and deploy LX Music
+**Branch**: `main`
+
+### Summary
+
+Integrated LX Music behind Orbit SSO, migrated the gateway to the HTTPS domain, deployed Orbit and LX to the server, validated authentication and route isolation, then committed and pushed the scoped product changes.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3d83d35` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 11: 收口 HTTPS 并推送 Android
+
+**Date**: 2026-07-14
+**Task**: 收口 HTTPS 并推送 Android
+**Branch**: `main`
+
+### Summary
+
+新增并验证 Android 客户端；将 HTTP、www 和旧 IP 308 归一到 HTTPS 裸域名，启用 Secure Cookie 与非 preload HSTS；生产部署、LX/证书续期回归和 origin/main 推送均通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c1455fd` | (see git log) |
+| `337b19a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
