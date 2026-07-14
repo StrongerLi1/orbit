@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css">
+  <style>html,body{margin:0;background:#f7f6f2;font-family:sans-serif}.wrap{padding:12px}#status{text-align:center;color:#625d55}</style>
+</head>
+<body>
+  <div class="wrap">
+    <div data-playcaptcha="auth"></div>
+    <p id="status">请完成抓娃娃验证</p>
+  </div>
+  <script src="/playcaptcha/playcaptcha-island.js"></script>
+  <script>
+    function mountCaptcha() {
+      if (!window.orbitPlayCaptcha) return setTimeout(mountCaptcha, 50);
+      window.orbitPlayCaptcha.mount({
+        element: document.querySelector('[data-playcaptcha="auth"]'),
+        mode: 'auth',
+        onVerified: function () {
+          document.getElementById('status').textContent = '验证成功';
+          Android.verified();
+        }
+      });
+    }
+    mountCaptcha();
+  </script>
+</body>
+</html>

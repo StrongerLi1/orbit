@@ -13,6 +13,12 @@ __pycache__/
 .pytest_cache/
 data/library/
 
+# Android local/build outputs
+android/.gradle/
+android/local.properties
+android/**/build/
+*.apk
+
 # LX Music local secrets and runtime data
 deploy/lxserver/lxserver.env
 deploy/lxserver/data/
