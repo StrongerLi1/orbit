@@ -1,0 +1,17 @@
+[Unit]
+Description=Orbit LX Music server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+TimeoutStartSec=120
+ExecStartPre=-/usr/bin/podman rm -f orbit-lxserver
+ExecStart=/usr/bin/podman run --name orbit-lxserver --replace --publish 127.0.0.1:9527:9527 --env-file /opt/orbit-lxserver/lxserver.env --volume /opt/orbit-lxserver/data:/server/data:Z --volume /opt/orbit-lxserver/logs:/server/logs:Z --memory 512m --cpus 0.5 --security-opt no-new-privileges localhost/orbit-lxserver:v1.9.4-ws8.21.0
+ExecStop=/usr/bin/podman stop -t 20 orbit-lxserver
+ExecStopPost=-/usr/bin/podman rm -f orbit-lxserver
+
+[Install]
+WantedBy=multi-user.target

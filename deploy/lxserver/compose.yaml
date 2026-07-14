@@ -1,0 +1,24 @@
+services:
+  lxserver:
+    build:
+      context: .
+    image: orbit-lxserver:v1.9.4-ws8.21.0
+    container_name: orbit-lxserver
+    restart: unless-stopped
+    env_file:
+      - lxserver.env
+    ports:
+      - "127.0.0.1:9527:9527"
+    volumes:
+      - ./data:/server/data
+      - ./logs:/server/logs
+    mem_limit: 512m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:9527/music/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

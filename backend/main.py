@@ -530,6 +530,13 @@ def auth_me(request: Request):
     return public_user(require_user(request))
 
 
+@app.get("/api/integrations")
+def integrations(request: Request):
+    require_user(request)
+    public_url = settings.lx_music_public_url
+    return {"lxMusic": {"enabled": bool(public_url), "publicUrl": public_url}}
+
+
 @app.post("/api/auth/playcaptcha")
 def auth_playcaptcha():
     return {"token": issue_playcaptcha_token()}

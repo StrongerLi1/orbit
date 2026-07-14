@@ -1,7 +1,8 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', loading: false, activeBookId: '', readers: null, bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', loading: false, activeBookId: '', readers: null, bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
+let authReturnTarget = new URLSearchParams(location.search).get('next') === 'music' ? 'music' : '';
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const escapeHtml = (value = '') => String(value).replace(/[&<>'"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[c]));
@@ -65,8 +66,37 @@ async function refreshAuth() {
   return true;
 }
 
+function renderIntegrations() {
+  const music = state.integrations?.lxMusic;
+  const nav = $('#lx-music-nav');
+  const publicUrl = music?.enabled ? String(music.publicUrl || '') : '';
+  nav.hidden = !publicUrl;
+  nav.href = publicUrl || '#';
+}
+
+async function loadIntegrations() {
+  try {
+    state.integrations = await request('/api/integrations');
+  } catch {
+    state.integrations = { lxMusic: { enabled: false, publicUrl: '' } };
+  }
+  renderIntegrations();
+}
+
+function returnToMusic() {
+  if (authReturnTarget !== 'music') return false;
+  authReturnTarget = '';
+  const music = state.integrations?.lxMusic;
+  const publicUrl = music?.enabled ? String(music.publicUrl || '') : '';
+  history.replaceState(null, '', '/');
+  if (!publicUrl) return false;
+  location.replace(publicUrl);
+  return true;
+}
+
 function resetToLoginRoute() {
-  if (location.pathname !== '/' || location.hash) history.replaceState(null, '', '/');
+  const route = authReturnTarget === 'music' ? '/?next=music' : '/';
+  if (`${location.pathname}${location.search}` !== route || location.hash) history.replaceState(null, '', route);
 }
 
 function showAuth(mode = 'login') {
@@ -90,6 +120,7 @@ function showApp() {
   $('#library-nav').hidden = !canReadLibrary();
   $('#hermes-chat-nav').hidden = !canUseHermesChat();
   $('#hermes-nav').hidden = !canManageAgents();
+  renderIntegrations();
 }
 
 async function authSubmit(path, form) {
@@ -104,6 +135,8 @@ async function finishAuthSubmit(playcaptchaToken) {
   $('#auth-captcha-status').textContent = '验证成功，正在继续...';
   state.user = await request(pending.path, { method:'POST', body:JSON.stringify({ ...pending.payload, playcaptchaToken }) });
   closeAuthCaptcha();
+  await loadIntegrations();
+  if (returnToMusic()) return;
   showApp();
   location.hash = 'dashboard';
   showPage('dashboard');
@@ -1309,6 +1342,8 @@ async function boot() {
   const now=new Date(); $('#today-chip').textContent=new Intl.DateTimeFormat('zh-CN',{month:'long',day:'numeric',weekday:'long'}).format(now); $('#greeting').textContent=`${now.getHours()<12?'早上':now.getHours()<18?'下午':'晚上'}好，欢迎回来`;
   try {
     state.user = await request('/api/auth/me');
+    await loadIntegrations();
+    if (returnToMusic()) return;
     showApp();
     const page = location.hash.slice(1) || 'dashboard';
     if (!location.hash) location.hash = page;

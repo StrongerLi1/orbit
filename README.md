@@ -29,6 +29,7 @@ export MYSQL_USER=orbit
 export MYSQL_PASSWORD=orbit_password
 export MYSQL_DATABASE=orbit
 export PANSOU_BASE_URL=http://127.0.0.1:8888
+export LX_MUSIC_PUBLIC_URL=https://shawnstronger.cloud:9528/music
 export LIBRARY_STORAGE_DIR=/path/to/private/orbit-library
 export LIBRARY_MAX_FILE_MB=100
 export LIBRARY_MAX_COVER_MB=5
@@ -80,6 +81,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/folders`，`PATCH/DELETE /api/folders/:id`
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
+- `GET /api/integrations`，返回当前登录用户可见的外部服务入口
 - `GET/POST /api/library/books`，共享图书目录与电子书上传
 - `PATCH/DELETE /api/library/books/:id`，管理员编辑或删除共享书籍
 - `GET /api/library/books/:id/download`，认证下载原始电子书
@@ -99,6 +101,16 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 ## 共享图书馆
 
 登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF 内嵌元数据，最后从文件名回退；EPUB 还可提取内嵌封面。所有用户都能记录多次阅读日期并查看读者历史；只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
+
+## LX Music
+
+Orbit 只提供 LX Music 入口和登录网关，[lxserver](https://github.com/XCQ0607/lxserver) 保持独立进程、独立数据和独立升级。设置 `LX_MUSIC_PUBLIC_URL=https://shawnstronger.cloud:9528/music` 后，登录用户侧栏会出现“音乐”并在新标签页打开；未配置时入口隐藏。浏览器访问 9528 时，Nginx 使用同一域名下的 Orbit Cookie 调用 `/api/auth/me`，未登录则跳到固定的 `https://shawnstronger.cloud/?next=music`，登录后再返回音乐页。Orbit Cookie 和认证头在代理到 LX 前会被删除。
+
+部署制品位于 [`deploy/lxserver/`](deploy/lxserver/)：镜像固定 lxserver v1.9.4 的提交 `0d653bf31b19635dd20299c5b341630b426c79f3`、源码包 SHA-256、Alpine 与 Node 22 基础镜像摘要，并在构建阶段将存在安全公告的 `ws 8.20.1` 升级为 `8.21.0`。先复制 `lxserver.env.example` 为不入库的 `lxserver.env`，生成强随机 `FRONTEND_PASSWORD`，创建 `data`、`logs` 并授予容器 UID 10001 写权限，然后使用 Compose，或在 Podman 服务器安装 `orbit-lxserver.service`。LX 只发布 `127.0.0.1:9527`，公网只开放 Nginx 9528；网关配置见 [`deploy/nginx/orbit.conf`](deploy/nginx/orbit.conf)。
+
+Web 播放器和管理后台均通过 Orbit 登录网关；管理后台地址为 `https://shawnstronger.cloud:9528/_orbit_lx_admin/`，进入后仍需独立的 LX `FRONTEND_PASSWORD`。LX 客户端同步和 Subsonic 不开放。`data/` 内含缓存和下载音乐，`logs/` 保存日志，两者都应纳入备份；重建容器不能删除这两个目录。升级时必须先审查上游路由变化、更新固定提交和校验值、重新运行 `npm audit --omit=dev`，并复测管理入口、同步和 Subsonic 边界。回滚时清空 `LX_MUSIC_PUBLIC_URL` 隐藏入口、移除 9528 Nginx server block、停止 LX 服务，但保留数据目录。
+
+Orbit 与 LX 网关均使用 `shawnstronger.cloud` 的 HTTPS 证书；续期时需确保 Nginx reload 后 443 和 9528 都加载新证书。LX 的 Apache-2.0 许可证不覆盖音乐内容、第三方音源或音乐平台条款，部署和使用者需要自行确认合规性。
 
 ## Hermes Agent
 

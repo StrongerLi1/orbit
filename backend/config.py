@@ -21,6 +21,7 @@ class Settings:
     pansou_base_url = os.getenv("PANSOU_BASE_URL") or os.getenv("LIMITLESS_SEARCH_BASE_URL", "http://127.0.0.1:8888")
     pansou_base_url = pansou_base_url.rstrip("/")
     pansou_timeout = float(os.getenv("PANSOU_TIMEOUT") or os.getenv("LIMITLESS_SEARCH_TIMEOUT", "12"))
+    lx_music_public_url = os.getenv("LX_MUSIC_PUBLIC_URL", "").strip().rstrip("/")
     library_storage_dir = Path(os.getenv("LIBRARY_STORAGE_DIR", str(BASE_DIR / "data" / "library"))).expanduser()
     library_max_file_mb = max(1, int(os.getenv("LIBRARY_MAX_FILE_MB", "100")))
     library_max_cover_mb = max(1, int(os.getenv("LIBRARY_MAX_COVER_MB", "5")))
