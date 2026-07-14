@@ -25,6 +25,9 @@ BOOK_CONTENT_TYPES = {
 COVER_CONTENT_TYPES = {"jpg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
 _CHUNK_SIZE = 1024 * 1024
 _EPUB_XML_LIMIT = 1024 * 1024
+_MOBI_RECORD0_LIMIT = 1024 * 1024
+_MOBI_TEXT_LIMIT = 64 * 1024
+_MOBI_EXTH_RECORD_LIMIT = 4096
 
 
 def ensure_library_storage() -> None:
@@ -262,6 +265,125 @@ def _pdf_metadata(path: Path) -> dict[str, str]:
         return {}
 
 
+def _big_endian(data: bytes, offset: int, size: int) -> int:
+    end = offset + size
+    if offset < 0 or size <= 0 or end > len(data):
+        raise ValueError("binary field is out of bounds")
+    return int.from_bytes(data[offset:end], "big")
+
+
+def _pdb_record_offsets(path: Path) -> list[int]:
+    file_size = path.stat().st_size
+    with path.open("rb") as source:
+        header = source.read(78)
+        if len(header) != 78:
+            raise ValueError("PalmDB header is incomplete")
+        record_count = _big_endian(header, 76, 2)
+        if record_count == 0:
+            raise ValueError("PalmDB has no records")
+        table_size = record_count * 8
+        table = source.read(table_size)
+    if len(table) != table_size or 78 + table_size > file_size:
+        raise ValueError("PalmDB record table is incomplete")
+
+    offsets = [_big_endian(table, index * 8, 4) for index in range(record_count)]
+    table_end = 78 + table_size
+    if offsets[0] < table_end or offsets[-1] >= file_size:
+        raise ValueError("PalmDB record offset is out of bounds")
+    if any(current >= following for current, following in zip(offsets, offsets[1:])):
+        raise ValueError("PalmDB record offsets are not increasing")
+    return [*offsets, file_size]
+
+
+def _read_pdb_record(path: Path, offsets: list[int], index: int, limit: int) -> bytes:
+    if index < 0 or index + 1 >= len(offsets):
+        return b""
+    size = offsets[index + 1] - offsets[index]
+    if size <= 0 or size > limit:
+        return b""
+    with path.open("rb") as source:
+        source.seek(offsets[index])
+        data = source.read(size)
+    return data if len(data) == size else b""
+
+
+def _decode_mobi_text(data: bytes, encoding: int) -> str:
+    if not data or len(data) > _MOBI_TEXT_LIMIT:
+        return ""
+    codec = "utf-8" if encoding == 65001 else "cp1252" if encoding == 1252 else "utf-8"
+    return re.sub(r"\s+", " ", data.decode(codec, errors="replace").strip("\0")).strip()
+
+
+def _azw3_metadata(path: Path, max_cover_bytes: int) -> dict[str, Any]:
+    try:
+        offsets = _pdb_record_offsets(path)
+        record0 = _read_pdb_record(path, offsets, 0, _MOBI_RECORD0_LIMIT)
+        if len(record0) < 128 or record0[16:20] != b"MOBI":
+            return {}
+
+        header_length = _big_endian(record0, 20, 4)
+        if header_length < 112 or 16 + header_length > len(record0):
+            return {}
+        encoding = _big_endian(record0, 28, 4)
+        full_name_offset = _big_endian(record0, 100, 4)
+        full_name_length = _big_endian(record0, 104, 4)
+        first_resource = _big_endian(record0, 124, 4)
+
+        full_name = ""
+        if full_name_length <= _MOBI_TEXT_LIMIT:
+            full_name_end = full_name_offset + full_name_length
+            if full_name_offset >= 0 and full_name_end <= len(record0):
+                full_name = _decode_mobi_text(record0[full_name_offset:full_name_end], encoding)
+
+        authors: list[str] = []
+        updated_title = ""
+        cover_offset: int | None = None
+        exth_offset = 16 + header_length
+        if record0[exth_offset:exth_offset + 4] == b"EXTH":
+            exth_length = _big_endian(record0, exth_offset + 4, 4)
+            exth_count = _big_endian(record0, exth_offset + 8, 4)
+            exth_end = exth_offset + exth_length
+            if exth_length < 12 or exth_end > len(record0) or exth_count > _MOBI_EXTH_RECORD_LIMIT:
+                raise ValueError("EXTH header is invalid")
+            cursor = exth_offset + 12
+            for _ in range(exth_count):
+                record_type = _big_endian(record0, cursor, 4)
+                record_length = _big_endian(record0, cursor + 4, 4)
+                record_end = cursor + record_length
+                if record_length < 8 or record_end > exth_end:
+                    raise ValueError("EXTH record is invalid")
+                value = record0[cursor + 8:record_end]
+                if record_type == 100:
+                    author = _decode_mobi_text(value, encoding)
+                    if author:
+                        authors.append(author)
+                elif record_type == 201 and len(value) >= 4:
+                    cover_offset = int.from_bytes(value[:4], "big")
+                elif record_type == 503 and not updated_title:
+                    updated_title = _decode_mobi_text(value, encoding)
+                cursor = record_end
+
+        result: dict[str, Any] = {
+            "title": updated_title or full_name,
+            "author": " / ".join(authors),
+        }
+        if first_resource != 0xFFFFFFFF and cover_offset is not None:
+            cover = _read_pdb_record(path, offsets, first_resource + cover_offset, max_cover_bytes)
+            if cover:
+                try:
+                    extension, content_type = detect_cover_bytes(cover[:16])
+                    result.update({
+                        "coverBytes": cover,
+                        "coverExtension": extension,
+                        "coverContentType": content_type,
+                    })
+                except HTTPException:
+                    pass
+        return result
+    except (OSError, ValueError):
+        return {}
+
+
 def extract_book_metadata(
     path: Path,
     original_filename: str,
@@ -274,6 +396,8 @@ def extract_book_metadata(
         embedded = _epub_metadata(path, max_cover_bytes)
     elif file_format == "pdf":
         embedded = _pdf_metadata(path)
+    elif file_format == "azw3":
+        embedded = _azw3_metadata(path, max_cover_bytes)
     for key in ("title", "author"):
         if embedded.get(key):
             result[key] = embedded[key]

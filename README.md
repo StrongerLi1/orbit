@@ -100,7 +100,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 
 ## 共享图书馆
 
-登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF 内嵌元数据，最后从文件名回退；EPUB 还可提取内嵌封面。所有用户都能记录多次阅读日期并查看读者历史；只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
+登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF/AZW3 内嵌元数据，最后从文件名回退；EPUB 和 AZW3 还可提取 JPEG、PNG 或 WebP 内嵌封面。所有用户都能记录多次阅读日期并查看读者历史；只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
 
 ## LX Music
 

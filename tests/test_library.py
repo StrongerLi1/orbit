@@ -72,6 +72,53 @@ def pdf_bytes(title: str = "PDF 内嵌书名", author: str = "PDF 内嵌作者")
     return buffer.getvalue()
 
 
+def azw3_bytes(
+    updated_title: str | None = "AZW3 更新书名",
+    full_name: str = "AZW3 原始书名",
+    authors: tuple[str, ...] = ("作者甲", "作者乙"),
+    cover: bytes | None = b"\xff\xd8\xff\xe0azw3-cover",
+) -> bytes:
+    def exth_record(record_type: int, value: bytes) -> bytes:
+        return record_type.to_bytes(4, "big") + (len(value) + 8).to_bytes(4, "big") + value
+
+    exth_records = [exth_record(100, author.encode()) for author in authors]
+    if cover is not None:
+        exth_records.append(exth_record(201, (0).to_bytes(4, "big")))
+    if updated_title is not None:
+        exth_records.append(exth_record(503, updated_title.encode()))
+    exth_body = b"".join(exth_records)
+    exth = b"EXTH" + (len(exth_body) + 12).to_bytes(4, "big") + len(exth_records).to_bytes(4, "big") + exth_body
+
+    header_length = 232
+    full_name_bytes = full_name.encode()
+    full_name_offset = 16 + header_length + len(exth)
+    record0 = bytearray(full_name_offset + len(full_name_bytes))
+    record0[16:20] = b"MOBI"
+    record0[20:24] = header_length.to_bytes(4, "big")
+    record0[28:32] = (65001).to_bytes(4, "big")
+    record0[36:40] = (8).to_bytes(4, "big")
+    record0[100:104] = full_name_offset.to_bytes(4, "big")
+    record0[104:108] = len(full_name_bytes).to_bytes(4, "big")
+    record0[124:128] = (1 if cover is not None else 0xFFFFFFFF).to_bytes(4, "big")
+    record0[16 + header_length:full_name_offset] = exth
+    record0[full_name_offset:] = full_name_bytes
+
+    records = [bytes(record0)]
+    if cover is not None:
+        records.append(cover)
+    palm_header = bytearray(78)
+    palm_header[60:68] = b"BOOKMOBI"
+    palm_header[76:78] = len(records).to_bytes(2, "big")
+    first_record_offset = 78 + len(records) * 8 + 2
+    record_offsets = []
+    cursor = first_record_offset
+    for record in records:
+        record_offsets.append(cursor)
+        cursor += len(record)
+    table = b"".join(offset.to_bytes(4, "big") + b"\0\0\0\0" for offset in record_offsets)
+    return bytes(palm_header) + table + b"\0\0" + b"".join(records)
+
+
 def test_file_validation(root: Path) -> None:
     pdf = root / "book.pdf"
     pdf.write_bytes(b"%PDF-1.7\nexample")
@@ -141,6 +188,60 @@ def test_metadata_extraction(root: Path) -> None:
     assert metadata["title"] == "PDF 内嵌书名"
     assert metadata["author"] == "PDF 内嵌作者"
 
+    azw3 = root / "文件书名 - 文件作者.azw3"
+    azw3.write_bytes(azw3_bytes())
+    assert detect_book_format(azw3, azw3.name) == "azw3"
+    metadata = extract_book_metadata(azw3, azw3.name, "azw3", 1024)
+    assert metadata["title"] == "AZW3 更新书名"
+    assert metadata["author"] == "作者甲 / 作者乙"
+    assert metadata["coverBytes"] == b"\xff\xd8\xff\xe0azw3-cover"
+    assert metadata["coverContentType"] == "image/jpeg"
+
+    full_name = root / "文件书名 - 文件作者-full-name.azw3"
+    full_name.write_bytes(azw3_bytes(updated_title=None, full_name="MOBI Full Name", authors=()))
+    metadata = extract_book_metadata(full_name, "文件书名 - 文件作者.azw3", "azw3", 1024)
+    assert metadata["title"] == "MOBI Full Name"
+    assert metadata["author"] == "文件作者"
+
+    covers = (
+        (b"\xff\xd8\xffjpeg", "image/jpeg"),
+        (b"\x89PNG\r\n\x1a\npng", "image/png"),
+        (b"RIFF\x00\x00\x00\x00WEBPwebp", "image/webp"),
+    )
+    for index, (cover, content_type) in enumerate(covers):
+        path = root / f"cover-{index}.azw3"
+        path.write_bytes(azw3_bytes(cover=cover))
+        assert extract_book_metadata(path, path.name, "azw3", 1024)["coverContentType"] == content_type
+
+    unsupported_cover = root / "unsupported-cover.azw3"
+    unsupported_cover.write_bytes(azw3_bytes(cover=b"GIF89a-cover"))
+    assert "coverBytes" not in extract_book_metadata(unsupported_cover, unsupported_cover.name, "azw3", 1024)
+    assert "coverBytes" not in extract_book_metadata(azw3, azw3.name, "azw3", 4)
+
+    malformed_table = bytearray(azw3_bytes())
+    malformed_table[78:82] = (len(malformed_table) + 1).to_bytes(4, "big")
+    malformed = root / "回退书名 - 回退作者.azw3"
+    malformed.write_bytes(malformed_table)
+    assert extract_book_metadata(malformed, malformed.name, "azw3", 1024) == {
+        "title": "回退书名",
+        "author": "回退作者",
+    }
+
+    malformed_exth = bytearray(azw3_bytes())
+    record0_offset = int.from_bytes(malformed_exth[78:82], "big")
+    exth_length_offset = record0_offset + 16 + 232 + 4
+    malformed_exth[exth_length_offset:exth_length_offset + 4] = len(malformed_exth).to_bytes(4, "big")
+    malformed.write_bytes(malformed_exth)
+    assert extract_book_metadata(malformed, malformed.name, "azw3", 1024) == {
+        "title": "回退书名",
+        "author": "回退作者",
+    }
+
+    assert extract_book_metadata(azw3, "文件书名 - 文件作者.mobi", "mobi", 1024) == {
+        "title": "文件书名",
+        "author": "文件作者",
+    }
+
 
 def test_storage_and_upload(root: Path) -> None:
     original_storage = settings.library_storage_dir
@@ -203,6 +304,15 @@ def test_upload_route_cleanup(root: Path) -> None:
             cover_file=None,
         )
 
+    async def azw3_manual_upload() -> dict:
+        return await main_module.library_upload_book(
+            FakeRequest(),
+            title="手写书名",
+            author="手写作者",
+            book_file=UploadFile(filename="source.azw3", file=io.BytesIO(azw3_bytes())),
+            cover_file=UploadFile(filename="manual.png", file=io.BytesIO(b"\x89PNG\r\n\x1a\nmanual-cover")),
+        )
+
     try:
         settings.library_storage_dir = root / "success"
         main_module.require_permission = require_upload
@@ -219,6 +329,14 @@ def test_upload_route_cleanup(root: Path) -> None:
         assert result["title"] == "内嵌书名"
         assert result["author"] == "内嵌作者"
         assert cover_path(created["coverFilename"]).read_bytes() == b"\xff\xd8\xff\xe0embedded-cover"
+        assert not any((settings.library_storage_dir / "tmp").iterdir())
+
+        settings.library_storage_dir = root / "azw3-manual"
+        created.clear()
+        result = asyncio.run(azw3_manual_upload())
+        assert result["title"] == "手写书名"
+        assert result["author"] == "手写作者"
+        assert cover_path(created["coverFilename"]).read_bytes() == b"\x89PNG\r\n\x1a\nmanual-cover"
         assert not any((settings.library_storage_dir / "tmp").iterdir())
 
         settings.library_storage_dir = root / "failure"
