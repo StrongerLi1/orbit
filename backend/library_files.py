@@ -325,9 +325,10 @@ def _azw3_metadata(path: Path, max_cover_bytes: int) -> dict[str, Any]:
         if header_length < 112 or 16 + header_length > len(record0):
             return {}
         encoding = _big_endian(record0, 28, 4)
-        full_name_offset = _big_endian(record0, 100, 4)
-        full_name_length = _big_endian(record0, 104, 4)
-        first_resource = _big_endian(record0, 124, 4)
+        # MOBI field offsets are relative to its header at record 0 byte 16.
+        full_name_offset = _big_endian(record0, 16 + 68, 4)
+        full_name_length = _big_endian(record0, 16 + 72, 4)
+        first_image = _big_endian(record0, 16 + 92, 4)
 
         full_name = ""
         if full_name_length <= _MOBI_TEXT_LIMIT:
@@ -367,8 +368,8 @@ def _azw3_metadata(path: Path, max_cover_bytes: int) -> dict[str, Any]:
             "title": updated_title or full_name,
             "author": " / ".join(authors),
         }
-        if first_resource != 0xFFFFFFFF and cover_offset is not None:
-            cover = _read_pdb_record(path, offsets, first_resource + cover_offset, max_cover_bytes)
+        if first_image != 0xFFFFFFFF and cover_offset is not None:
+            cover = _read_pdb_record(path, offsets, first_image + cover_offset, max_cover_bytes)
             if cover:
                 try:
                     extension, content_type = detect_cover_bytes(cover[:16])

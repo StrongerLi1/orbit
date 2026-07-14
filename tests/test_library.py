@@ -83,7 +83,7 @@ def azw3_bytes(
 
     exth_records = [exth_record(100, author.encode()) for author in authors]
     if cover is not None:
-        exth_records.append(exth_record(201, (0).to_bytes(4, "big")))
+        exth_records.append(exth_record(201, (2).to_bytes(4, "big")))
     if updated_title is not None:
         exth_records.append(exth_record(503, updated_title.encode()))
     exth_body = b"".join(exth_records)
@@ -97,15 +97,22 @@ def azw3_bytes(
     record0[20:24] = header_length.to_bytes(4, "big")
     record0[28:32] = (65001).to_bytes(4, "big")
     record0[36:40] = (8).to_bytes(4, "big")
-    record0[100:104] = full_name_offset.to_bytes(4, "big")
-    record0[104:108] = len(full_name_bytes).to_bytes(4, "big")
-    record0[124:128] = (1 if cover is not None else 0xFFFFFFFF).to_bytes(4, "big")
+    record0[84:88] = full_name_offset.to_bytes(4, "big")
+    record0[88:92] = len(full_name_bytes).to_bytes(4, "big")
+    record0[108:112] = (3 if cover is not None else 0xFFFFFFFF).to_bytes(4, "big")
+    record0[124:128] = (1).to_bytes(4, "big")
     record0[16 + header_length:full_name_offset] = exth
     record0[full_name_offset:] = full_name_bytes
 
     records = [bytes(record0)]
     if cover is not None:
-        records.append(cover)
+        records.extend((
+            b"compressed-text-1",
+            b"compressed-text-2",
+            b"\xff\xd8\xffother-image",
+            b"image-gap",
+            cover,
+        ))
     palm_header = bytearray(78)
     palm_header[60:68] = b"BOOKMOBI"
     palm_header[76:78] = len(records).to_bytes(2, "big")
