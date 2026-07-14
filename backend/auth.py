@@ -344,7 +344,7 @@ def _set_cookie(response: Response, name: str, value: str, max_age: int) -> None
         max_age=max_age,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=True,
         path="/",
     )
 

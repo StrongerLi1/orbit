@@ -43,6 +43,8 @@ def main() -> None:
     assert 'target="_blank" rel="noopener noreferrer"' in html
     assert "auth_request /_orbit_lx_auth;" in nginx
     assert "return 302 https://shawnstronger.cloud/?next=music;" in nginx
+    assert "return 308 https://shawnstronger.cloud$request_uri;" in nginx
+    assert 'add_header Strict-Transport-Security "max-age=31536000" always;' in nginx
     assert "listen 9528 ssl;" in nginx
     for header in ("Cookie", "Authorization", "X-User-Token", "X-Orbit-User"):
         assert f'proxy_set_header {header} "";' in nginx

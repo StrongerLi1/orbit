@@ -3,9 +3,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
-from backend.auth import PERMISSIONS, ROLES, ensure_user_active, public_user
+from backend.auth import PERMISSIONS, ROLES, _set_cookie, ensure_user_active, public_user
 
 
 def main() -> None:
@@ -62,6 +62,14 @@ def main() -> None:
     assert "agents:manage" in admin["permissions"]
     assert "users:manage" in admin["permissions"]
     ensure_user_active({"is_banned": 0})
+
+    response = Response()
+    _set_cookie(response, "orbit_test", "value", 60)
+    cookie = response.headers["set-cookie"]
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
+    assert "Secure" in cookie
+
 
 if __name__ == "__main__":
     main()
