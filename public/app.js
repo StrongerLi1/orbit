@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', loading: false, activeBookId: '', readers: null, bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
 let authReturnTarget = new URLSearchParams(location.search).get('next') === 'music' ? 'music' : '';
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -261,6 +261,7 @@ function libraryBookHtml(book) {
       <div class="library-card-actions">
         <button class="library-record" data-library-record="${escapeHtml(book.id)}">记录阅读</button>
         <button data-library-readers="${escapeHtml(book.id)}">读者</button>
+        <button data-library-reviews="${escapeHtml(book.id)}">书评</button>
         <a href="/api/library/books/${escapeHtml(book.id)}/download">下载</a>
         ${manage}
       </div>
@@ -337,10 +338,13 @@ function openLibraryReadModal(bookId, record = null) {
   state.library.readBookId = bookId;
   state.library.editReadId = record?.id || '';
   $('#library-read-title').textContent = record ? '修改阅读日期' : '记录一次阅读';
-  $('#library-read-form').elements.readDate.value = record?.readDate || dateKey();
+  const form = $('#library-read-form');
+  form.elements.readDate.value = record?.readDate || dateKey();
+  form.elements.review.value = '';
+  $('#library-read-review-field').hidden = Boolean(record);
   $('#library-readers-modal').hidden = true;
   $('#library-read-modal').hidden = false;
-  setTimeout(() => $('#library-read-form').elements.readDate.focus(), 50);
+  setTimeout(() => form.elements.readDate.focus(), 50);
 }
 
 function renderLibraryReaders() {
@@ -371,11 +375,43 @@ async function openLibraryReaders(bookId) {
   }
 }
 
+function renderLibraryReviews() {
+  const container = $('#library-reviews-content');
+  const book = state.library.books.find((item) => item.id === state.library.reviewBookId);
+  $('#library-review-title').textContent = book ? `《${book.title}》的书评` : '书评';
+  const reviews = state.library.reviews;
+  if (!reviews) {
+    container.innerHTML = empty('正在加载书评…');
+    return;
+  }
+  container.innerHTML = reviews.map((review) => `<article class="library-review">
+    <div class="library-review-head"><strong>${escapeHtml(review.username)}${review.canDelete && review.username === state.user?.username ? ' · 我' : ''}</strong><time datetime="${escapeHtml(review.createdAt)}">${escapeHtml(review.createdAt)}</time></div>
+    <p>${escapeHtml(review.content)}</p>
+    ${review.canDelete ? `<button class="library-review-delete" data-library-review-delete="${escapeHtml(review.id)}">删除</button>` : ''}
+  </article>`).join('') || empty('还没有书评，来留下第一条吧');
+}
+
+async function openLibraryReviews(bookId) {
+  state.library.reviewBookId = bookId;
+  state.library.reviews = null;
+  $('#library-review-modal').hidden = false;
+  renderLibraryReviews();
+  try {
+    state.library.reviews = await request(`/api/library/books/${bookId}/reviews`);
+    renderLibraryReviews();
+  } catch (error) {
+    $('#library-reviews-content').innerHTML = `<div class="empty status-error">${escapeHtml(error.message)}</div>`;
+  }
+}
+
 function closeLibraryModals() {
   $('#library-book-modal').hidden = true;
   $('#library-read-modal').hidden = true;
   $('#library-readers-modal').hidden = true;
+  $('#library-review-modal').hidden = true;
   state.library.readers = null;
+  state.library.reviews = null;
+  state.library.reviewBookId = '';
 }
 
 function renderHermes() {
@@ -955,7 +991,7 @@ document.addEventListener('click', async (event) => {
   const add = event.target.closest('[data-add]'); if (add) openModal(add.dataset.add);
   if (event.target.closest('#modal .close') || event.target === $('#modal')) closeModal();
   if (event.target.closest('#auth-captcha-modal .close') || event.target === $('#auth-captcha-modal')) closeAuthCaptcha();
-  if (event.target.closest('[data-library-close]') || ['library-book-modal','library-read-modal','library-readers-modal'].includes(event.target.id)) closeLibraryModals();
+  if (event.target.closest('[data-library-close]') || ['library-book-modal','library-read-modal','library-readers-modal','library-review-modal'].includes(event.target.id)) closeLibraryModals();
   if (event.target.closest('[data-library-upload]')) {
     if (!canUploadLibrary()) { toast('没有上传权限'); return; }
     $('#quick-menu').hidden = true;
@@ -976,6 +1012,11 @@ document.addEventListener('click', async (event) => {
   const libraryReaders = event.target.closest('[data-library-readers]');
   if (libraryReaders) {
     await openLibraryReaders(libraryReaders.dataset.libraryReaders);
+    return;
+  }
+  const libraryReviews = event.target.closest('[data-library-reviews]');
+  if (libraryReviews) {
+    await openLibraryReviews(libraryReviews.dataset.libraryReviews);
     return;
   }
   const libraryEdit = event.target.closest('[data-library-edit]');
@@ -1014,6 +1055,18 @@ document.addEventListener('click', async (event) => {
       await loadLibrary();
       await openLibraryReaders(libraryReadDelete.dataset.bookId);
       toast('阅读记录已删除');
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  const libraryReviewDelete = event.target.closest('[data-library-review-delete]');
+  if (libraryReviewDelete) {
+    if (!confirm('确定删除这条书评吗？')) return;
+    try {
+      await request(`/api/library/books/${state.library.reviewBookId}/reviews/${libraryReviewDelete.dataset.libraryReviewDelete}`, { method:'DELETE' });
+      await openLibraryReviews(state.library.reviewBookId);
+      toast('书评已删除');
     } catch (error) {
       toast(error.message);
     }
@@ -1204,14 +1257,33 @@ $('#library-read-form').addEventListener('submit', async (event) => {
   const bookId = state.library.readBookId;
   const readId = state.library.editReadId;
   const returnToReaders = Boolean(state.library.readers);
+  const review = readId ? '' : form.elements.review.value.trim();
   button.disabled = true;
   try {
     const path = readId ? `/api/library/books/${bookId}/reads/${readId}` : `/api/library/books/${bookId}/reads`;
-    await request(path, { method:readId ? 'PATCH' : 'POST', body:JSON.stringify({ readDate }) });
+    await request(path, { method:readId ? 'PATCH' : 'POST', body:JSON.stringify({ readDate, review }) });
     $('#library-read-modal').hidden = true;
     await loadLibrary();
     if (returnToReaders) await openLibraryReaders(bookId);
     toast(readId ? '阅读日期已更新' : '已记录这次阅读');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+$('#library-review-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  const content = form.elements.content.value.trim();
+  if (!content) return;
+  button.disabled = true;
+  try {
+    await request(`/api/library/books/${state.library.reviewBookId}/reviews`, { method:'POST', body:JSON.stringify({ content }) });
+    form.reset();
+    await openLibraryReviews(state.library.reviewBookId);
+    toast('书评已发布');
   } catch (error) {
     toast(error.message);
   } finally {

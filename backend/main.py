@@ -64,9 +64,11 @@ from .library_files import (
 )
 from .repository import (
     create_book,
+    create_book_review,
     create_book_read,
     create_item,
     delete_book,
+    delete_book_review,
     delete_book_read,
     delete_item,
     folder_exists,
@@ -79,6 +81,7 @@ from .repository import (
     get_book_storage,
     get_item,
     list_admin_hermes_conversations,
+    list_book_reviews,
     list_hermes_conversations,
     list_hermes_messages,
     list_book_reads,
@@ -1217,6 +1220,13 @@ def _library_date(value: Any) -> str:
     return candidate
 
 
+def _library_review(value: Any) -> str:
+    candidate = str(value or "").strip()
+    if len(candidate) > 3000:
+        raise HTTPException(status_code=422, detail="书评不能超过 3000 个字符")
+    return candidate
+
+
 def _library_book_or_404(book_id: str, user_id: str) -> dict[str, Any]:
     book = get_book(book_id, user_id)
     if not book:
@@ -1436,12 +1446,45 @@ def library_book_reads(book_id: str, request: Request):
     return list_book_reads(book_id, user["id"])
 
 
+@app.get("/api/library/books/{book_id}/reviews")
+def library_book_reviews(book_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    return list_book_reviews(book_id, user["id"], "users:manage" in user.get("permissions", []))
+
+
+@app.post("/api/library/books/{book_id}/reviews", status_code=201)
+async def library_create_review(book_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    data = await request.json()
+    content = _library_review(data.get("content"))
+    if not content:
+        raise HTTPException(status_code=422, detail="书评内容不能为空")
+    return create_book_review(book_id, user["id"], user["username"], content)
+
+
+@app.delete("/api/library/books/{book_id}/reviews/{review_id}")
+def library_delete_review(book_id: str, review_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    if not delete_book_review(book_id, review_id, user["id"], "users:manage" in user.get("permissions", [])):
+        raise HTTPException(status_code=404, detail="书评不存在")
+    return {"ok": True}
+
+
 @app.post("/api/library/books/{book_id}/reads", status_code=201)
 async def library_create_read(book_id: str, request: Request):
     user = require_permission(request, "library:read")
     _library_book_or_404(book_id, user["id"])
     data = await request.json()
-    return create_book_read(book_id, user["id"], _library_date(data.get("readDate")))
+    return create_book_read(
+        book_id,
+        user["id"],
+        _library_date(data.get("readDate")),
+        _library_review(data.get("review")),
+        user["username"],
+    )
 
 
 @app.patch("/api/library/books/{book_id}/reads/{read_id}")

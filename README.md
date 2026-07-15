@@ -87,6 +87,8 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET /api/library/books/:id/download`，认证下载原始电子书
 - `GET/POST /api/library/books/:id/reads`，查看或新增多次阅读记录
 - `PATCH/DELETE /api/library/books/:id/reads/:readId`，用户修改或删除自己的阅读记录
+- `GET/POST /api/library/books/:id/reviews`，查看或发布独立书评；已读未读用户均可发布
+- `DELETE /api/library/books/:id/reviews/:reviewId`，用户删除自己的书评，管理员可删除全部书评
 - `GET /api/agents/hermes/status`，`POST /api/agents/hermes/start`，`POST /api/agents/hermes/stop`，管理员管理本地 Hermes Agent dashboard
 - `GET/POST /api/hermes-chat/conversations`，`GET/DELETE /api/hermes-chat/conversations/:id`，`POST /api/hermes-chat/conversations/:id/messages/stream`，`POST /api/hermes-chat/conversations/:id/messages/stop`，用户通过 SSE 使用 Orbit 自带 Hermes 聊天
 - `POST /api/auth/register`，`POST /api/auth/login`，`POST /api/auth/refresh`，`POST /api/auth/logout`，`GET /api/auth/me`
@@ -100,7 +102,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 
 ## 共享图书馆
 
-登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF/AZW3 内嵌元数据，最后从文件名回退；EPUB 和 AZW3 可提取 JPEG、PNG 或 WebP 内嵌封面，PDF 默认将完整第一页生成白底 JPEG 封面。所有用户都能记录多次阅读日期并查看读者历史；只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
+登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF/AZW3 内嵌元数据，最后从文件名回退；EPUB 和 AZW3 可提取 JPEG、PNG 或 WebP 内嵌封面，PDF 默认将完整第一页生成白底 JPEG 封面。所有用户都能记录多次阅读日期、查看读者历史并发布独立书评；只有评论作者可以删除自己的书评，管理员可以删除全部书评，阅读记录表单也支持可选书评。只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
 
 ## LX Music
 

@@ -233,6 +233,20 @@ def initialize_database() -> None:
             )
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS book_reviews (
+                    id VARCHAR(64) PRIMARY KEY,
+                    book_id VARCHAR(64) NOT NULL,
+                    user_id VARCHAR(64) NOT NULL,
+                    reviewer_name VARCHAR(64) NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at VARCHAR(40) NOT NULL,
+                    INDEX idx_book_reviews_book_created (book_id, created_at),
+                    INDEX idx_book_reviews_user (user_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS hermes_conversations (
                     id VARCHAR(64) PRIMARY KEY,
                     user_id VARCHAR(64) NOT NULL,

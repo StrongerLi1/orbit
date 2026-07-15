@@ -239,6 +239,7 @@
       <div class="modal-head"><div><span class="label">READING HISTORY</span><h2 id="library-read-title">记录一次阅读</h2></div><button class="close" data-library-close aria-label="关闭">×</button></div>
       <form id="library-read-form">
         <div class="field"><label>阅读日期</label><input name="readDate" type="date" required></div>
+        <div class="field" id="library-read-review-field"><label>书评（可选）</label><textarea name="review" maxlength="3000" placeholder="留下你对这本书的感受…"></textarea><small>新建阅读记录时填写，会同时发布一条独立书评。</small></div>
         <div class="form-actions"><button type="button" class="secondary" data-library-close>取消</button><button type="submit" class="primary">保存记录</button></div>
       </form>
     </div>
@@ -249,10 +250,20 @@
       <div id="library-readers-content" class="library-readers-content"></div>
     </div>
   </div>
+  <div class="modal-backdrop" id="library-review-modal" hidden>
+    <div class="modal library-review-modal" role="dialog" aria-modal="true" aria-labelledby="library-review-title">
+      <div class="modal-head"><div><span class="label">BOOK REVIEWS</span><h2 id="library-review-title">书评</h2></div><button class="close" data-library-close aria-label="关闭">×</button></div>
+      <div id="library-reviews-content" class="library-reviews-content"></div>
+      <form id="library-review-form" class="library-review-form">
+        <div class="field"><label>写一条书评</label><textarea name="content" maxlength="3000" required placeholder="分享你对这本书的感受…"></textarea></div>
+        <div class="form-actions"><button type="submit" class="primary">发布书评</button></div>
+      </form>
+    </div>
+  </div>
   <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-library-upload>▤ 上传电子书</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20260714-library-metadata-lx"></script>
+  <script src="/app.js?v=20260715-library-reviews"></script>
 </body>
 </html>

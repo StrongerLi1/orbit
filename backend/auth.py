@@ -223,6 +223,7 @@ def delete_user_account(user_id: str) -> dict[str, bool]:
     with connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("DELETE FROM book_reads WHERE user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM book_reviews WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM todos WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM plans WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))

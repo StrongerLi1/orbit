@@ -18,6 +18,8 @@ GET        /api/library/books/{book_id}/download
 GET        /api/library/books/{book_id}/cover
 GET|POST   /api/library/books/{book_id}/reads
 PATCH|DELETE /api/library/books/{book_id}/reads/{read_id}
+GET|POST   /api/library/books/{book_id}/reviews
+DELETE     /api/library/books/{book_id}/reviews/{review_id}
 ```
 
 ```sql
@@ -25,6 +27,7 @@ books(id, title, author, file_format, original_filename, stored_filename,
       file_size, cover_filename, cover_content_type, uploaded_by,
       uploaded_by_name, created_at, updated_at)
 book_reads(id, book_id, user_id, read_date, created_at, updated_at)
+book_reviews(id, book_id, user_id, reviewer_name, content, created_at)
 ```
 
 ```python
@@ -34,6 +37,9 @@ metadata_from_filename(original_filename) -> {title: str, author: str}
 extract_book_metadata(path, original_filename, file_format, max_cover_bytes) -> dict
 list_books(current_user_id) -> list[dict]
 list_book_reads(book_id, current_user_id) -> dict
+list_book_reviews(book_id, current_user_id, is_admin) -> list[dict]
+create_book_review(book_id, user_id, reviewer_name, content) -> dict
+delete_book_review(book_id, review_id, user_id, is_admin) -> bool
 ```
 
 ### 3. Contracts
@@ -50,7 +56,10 @@ list_book_reads(book_id, current_user_id) -> dict
 - `currentUserRead` is derived from whether the current user has at least one record. Re-reading always inserts another record; there is no `(book_id, user_id, read_date)` uniqueness constraint.
 - Catalog statistics are `COUNT(DISTINCT user_id)` as `readerCount` and `COUNT(*)` as `readCount`.
 - Reader responses expose usernames and dates, never user IDs. Only the record owner can update or delete a reading record.
-- Deleting a book removes its metadata, all reading records, ebook, and cover. Deleting a user removes that user's reading records but retains uploaded shared books.
+- Book reviews are independent of reading records. Any authenticated library reader may create a review whether or not they have a reading record; a review stores the author UID plus a username snapshot and may be repeated for the same user/book.
+- Review responses expose `id`, `username`, `content`, `createdAt`, and server-computed `canDelete`; they never expose the author UID. Only the review owner or a user with `users:manage` may delete a review.
+- `POST /api/library/books/{book_id}/reviews` accepts `{ "content": string }`; content is trimmed, required, and limited to 3000 characters. `POST .../reads` also accepts optional `{ "review": string }`; when non-empty, the read and independent review are inserted in one transaction. Updating a read date never changes a review.
+- Deleting a book removes its metadata, all reading records, reviews, ebook, and cover. Deleting a user removes that user's reading records and reviews but retains uploaded shared books.
 
 ### 4. Validation & Error Matrix
 
@@ -60,6 +69,7 @@ list_book_reads(book_id, current_user_id) -> dict
 - Unsupported extension or mismatched file signature -> `415`.
 - Missing book/file/cover -> `404`.
 - Reading-record update/delete by a different user -> `404` to avoid disclosing ownership.
+- Empty or overlong review -> `422`; deleting another user's review as a non-admin -> `404`.
 - Any failed upload -> no database row, final file, or temporary part file remains.
 
 ### 5. Good/Base/Bad Cases
@@ -67,7 +77,9 @@ list_book_reads(book_id, current_user_id) -> dict
 - Good: Stream an upload to a random temporary file, validate the complete content, atomically move it, then create metadata with compensating cleanup on failure.
 - Good: Prefill from the filename immediately, but let the server replace unchanged previews with trusted embedded EPUB/PDF metadata.
 - Good: Return grouped readers with an `isCurrentUser` marker so the UI renders edit/delete only for owned records.
+- Good: Render review deletion from the API's `canDelete` flag while keeping owner/admin enforcement in the backend.
 - Base: A book without a cover returns `404` from the cover route and renders a deterministic CSS placeholder.
+- Base: Editing a reading date leaves all independent reviews unchanged; an optional review on a new read creates one additional review.
 - Base: Malformed or absent embedded metadata is a soft failure and falls back to filename/manual input without rejecting an otherwise valid ebook.
 - Bad: Use the original filename as a storage path or expose `LIBRARY_STORAGE_DIR` under `/public`.
 - Bad: Submit filename-prefilled fields as manual values; this silently defeats embedded metadata priority.
@@ -81,6 +93,7 @@ list_book_reads(book_id, current_user_id) -> dict
 - Upload: successful file placement, manual-field/manual-cover precedence, embedded metadata/cover fallback, and cleanup when metadata creation fails.
 - Repository: distinct-reader count, total-read count, current-user count, and grouped multi-read history.
 - API: strict dates, authenticated access, admin-only shared mutations, owner-only record update/delete, and hidden cross-user records.
+- Reviews: authenticated unread/read users can create; list hides UIDs; owner deletion, admin deletion, empty/overlong validation, and read+review atomic creation are covered.
 - Browser: desktop and mobile grids, no horizontal overflow, filters, upload modal, grouped readers, and own-record editing.
 
 ### 7. Wrong vs Correct

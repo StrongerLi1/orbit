@@ -394,6 +394,17 @@ def _book_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _book_review_row(row: dict[str, Any], current_user_id: str = "", is_admin: bool = False) -> dict[str, Any]:
+    owner_user_id = row["user_id"]
+    return {
+        "id": row["id"],
+        "username": row["reviewer_name"],
+        "content": row["content"],
+        "createdAt": row["created_at"],
+        "canDelete": is_admin or owner_user_id == current_user_id,
+    }
+
+
 def list_books(user_id: str) -> list[dict[str, Any]]:
     with connection() as conn:
         with conn.cursor() as cursor:
@@ -505,6 +516,7 @@ def delete_book(book_id: str) -> dict[str, Any] | None:
                     conn.rollback()
                     return None
                 cursor.execute("DELETE FROM book_reads WHERE book_id = %s", (book_id,))
+                cursor.execute("DELETE FROM book_reviews WHERE book_id = %s", (book_id,))
                 cursor.execute("DELETE FROM books WHERE id = %s", (book_id,))
             conn.commit()
             return book
@@ -548,19 +560,105 @@ def list_book_reads(book_id: str, current_user_id: str) -> dict[str, Any]:
     return {"readerCount": len(readers), "readCount": len(rows), "readers": readers}
 
 
-def create_book_read(book_id: str, user_id: str, read_date: str) -> dict[str, Any]:
-    read_id = str(uuid.uuid4())
-    created_at = now_iso()
+def list_book_reviews(book_id: str, current_user_id: str, is_admin: bool = False) -> list[dict[str, Any]]:
     with connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                INSERT INTO book_reads (id, book_id, user_id, read_date, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                SELECT id, book_id, user_id, reviewer_name, content, created_at
+                FROM book_reviews
+                WHERE book_id = %s
+                ORDER BY created_at DESC
                 """,
-                (read_id, book_id, user_id, read_date, created_at, created_at),
+                (book_id,),
             )
-    return {"id": read_id, "readDate": read_date, "createdAt": created_at, "updatedAt": created_at}
+            return [_book_review_row(row, current_user_id, is_admin) for row in cursor.fetchall()]
+
+
+def _insert_book_review(
+    cursor,
+    review_id: str,
+    book_id: str,
+    user_id: str,
+    reviewer_name: str,
+    content: str,
+    created_at: str,
+) -> None:
+    cursor.execute(
+        """
+        INSERT INTO book_reviews (id, book_id, user_id, reviewer_name, content, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (review_id, book_id, user_id, reviewer_name, content, created_at),
+    )
+
+
+def create_book_review(book_id: str, user_id: str, reviewer_name: str, content: str) -> dict[str, Any]:
+    review_id = str(uuid.uuid4())
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            _insert_book_review(cursor, review_id, book_id, user_id, reviewer_name, content, created_at)
+    return {
+        "id": review_id,
+        "username": reviewer_name,
+        "content": content,
+        "createdAt": created_at,
+        "canDelete": True,
+    }
+
+
+def delete_book_review(book_id: str, review_id: str, user_id: str, is_admin: bool = False) -> bool:
+    where = "id = %s AND book_id = %s"
+    params: tuple[Any, ...] = (review_id, book_id)
+    if not is_admin:
+        where += " AND user_id = %s"
+        params += (user_id,)
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(f"DELETE FROM book_reviews WHERE {where}", params)
+            return cursor.rowcount > 0
+
+
+def create_book_read(
+    book_id: str,
+    user_id: str,
+    read_date: str,
+    review_content: str = "",
+    reviewer_name: str = "",
+) -> dict[str, Any]:
+    read_id = str(uuid.uuid4())
+    created_at = now_iso()
+    review = None
+    with connection() as conn:
+        conn.begin()
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO book_reads (id, book_id, user_id, read_date, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (read_id, book_id, user_id, read_date, created_at, created_at),
+                )
+                if review_content:
+                    review_id = str(uuid.uuid4())
+                    _insert_book_review(cursor, review_id, book_id, user_id, reviewer_name, review_content, created_at)
+                    review = {
+                        "id": review_id,
+                        "username": reviewer_name,
+                        "content": review_content,
+                        "createdAt": created_at,
+                        "canDelete": True,
+                    }
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+    result = {"id": read_id, "readDate": read_date, "createdAt": created_at, "updatedAt": created_at}
+    if review is not None:
+        result["review"] = review
+    return result
 
 
 def update_book_read(book_id: str, read_id: str, user_id: str, read_date: str) -> dict[str, Any] | None:
