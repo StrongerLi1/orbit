@@ -1480,7 +1480,7 @@ async def api_create(collection: str, request: Request):
     valid = validate(collection, await request.json())
     if collection == "folders" and folder_exists(valid["name"]):
         raise HTTPException(status_code=409, detail="这个收藏夹已经存在")
-    return create_item(collection, valid, user if collection == "excerpts" else None)
+    return create_item(collection, valid, user)
 
 
 @app.patch("/api/{collection}/{item_id}")
@@ -1488,7 +1488,7 @@ async def api_update(collection: str, item_id: str, request: Request):
     user = require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
-    existing = get_item(collection, item_id)
+    existing = get_item(collection, item_id, user["id"], "users:manage" in user.get("permissions", []))
     if not existing:
         raise HTTPException(status_code=404, detail="记录不存在")
     if collection == "excerpts" and not can_manage_excerpt(user, excerpt_owner_id(item_id)):
@@ -1497,7 +1497,7 @@ async def api_update(collection: str, item_id: str, request: Request):
     if collection == "folders" and "sortOrder" in data:
         require_permission(request, "folders:manage")
     valid = validate(collection, {**existing, **data})
-    return update_item(collection, item_id, valid, user if collection == "excerpts" else None)
+    return update_item(collection, item_id, valid, user)
 
 
 @app.delete("/api/{collection}/{item_id}")
@@ -1507,14 +1507,14 @@ def api_delete(collection: str, item_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Not found")
     if collection == "folders":
         require_permission(request, "folders:manage")
-    existing = get_item(collection, item_id)
+    existing = get_item(collection, item_id, user["id"], "users:manage" in user.get("permissions", []))
     if not existing:
         raise HTTPException(status_code=404, detail="记录不存在")
     if collection == "excerpts" and not can_manage_excerpt(user, excerpt_owner_id(item_id)):
         raise HTTPException(status_code=403, detail="只能删除自己的摘录")
     if collection == "folders" and folder_has_bookmarks(existing["name"]):
         raise HTTPException(status_code=409, detail="请先移动收藏夹内的网站")
-    return delete_item(collection, item_id)
+    return delete_item(collection, item_id, user)
 
 
 app.mount("/assets", StaticFiles(directory=PUBLIC_DIR), name="assets")

@@ -7,7 +7,7 @@
     "build:captcha": "node scripts/build-playcaptcha.mjs",
     "dev": "uvicorn backend.main:app --host 0.0.0.0 --port 3000 --reload",
     "start": "python3 run.py",
-    "test": "python3 -m compileall backend run.py tests && node --check public/app.js && python3 tests/test_rbac.py && python3 tests/test_excerpt_permissions.py && python3 tests/test_folder_sort.py && python3 tests/test_hermes_agent.py && python3 tests/test_library.py && python3 tests/test_lx_music.py"
+    "test": "python3 -m compileall backend run.py tests && node --check public/app.js && python3 tests/test_rbac.py && python3 tests/test_excerpt_permissions.py && python3 tests/test_user_scoped_content.py && python3 tests/test_folder_sort.py && python3 tests/test_hermes_agent.py && python3 tests/test_library.py && python3 tests/test_lx_music.py"
   },
   "engines": {
     "node": ">=20"
