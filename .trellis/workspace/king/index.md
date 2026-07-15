@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~928 | Active |
+| `journal-1.md` | ~961 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-07-15 | 摘录归属与个人权限 | `31978e8` | `main` |
 | 15 | 2026-07-15 | Shared library book reviews | `0ca0266` | `main` |
 | 14 | 2026-07-15 | 按用户隔离待办和计划 | `31978e8`, `e1dcdeb`, `5e2ee3d` | `main` |
 | 13 | 2026-07-15 | Native Android client with HTTPS domain | `c1455fd`, `2c46ff5` | `main` |

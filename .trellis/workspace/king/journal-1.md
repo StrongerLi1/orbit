@@ -926,3 +926,36 @@ Implemented and deployed shared library independent book reviews; all tests and 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: 摘录归属与个人权限
+
+**Date**: 2026-07-15
+**Task**: 摘录归属与个人权限
+**Branch**: `main`
+
+### Summary
+
+完成摘录创建人记录与 UID 权限控制：普通用户只能编辑或删除自己的摘录，管理员可管理全部摘录；浏览器和 Android 客户端展示创建人并支持编辑删除；测试通过，代码已部署并推送到 main。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31978e8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
