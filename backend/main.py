@@ -73,6 +73,7 @@ from .repository import (
     folder_has_bookmarks,
     add_hermes_message,
     create_hermes_conversation,
+    excerpt_owner_id,
     get_hermes_conversation,
     get_book,
     get_book_storage,
@@ -387,6 +388,10 @@ def _parse_hermes_stream_record(raw: bytes) -> dict[str, str]:
     if kind == "error":
         result["error"] = str(record.get("error") or "Hermes 运行失败")[:500]
     return result
+
+
+def can_manage_excerpt(user: dict[str, Any], owner_user_id: str | None) -> bool:
+    return "users:manage" in user.get("permissions", []) or owner_user_id == user.get("id")
 
 
 def _sse_event(event: str, payload: dict[str, Any]) -> str:
@@ -1461,41 +1466,43 @@ def library_delete_read(book_id: str, read_id: str, request: Request):
 
 @app.get("/api/{collection}")
 def api_list(collection: str, request: Request):
-    require_permission(request, "content:read")
+    user = require_permission(request, "content:read")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
-    return list_items(collection)
+    return list_items(collection, user["id"], "users:manage" in user.get("permissions", []))
 
 
 @app.post("/api/{collection}", status_code=201)
 async def api_create(collection: str, request: Request):
-    require_permission(request, "content:write")
+    user = require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     valid = validate(collection, await request.json())
     if collection == "folders" and folder_exists(valid["name"]):
         raise HTTPException(status_code=409, detail="这个收藏夹已经存在")
-    return create_item(collection, valid)
+    return create_item(collection, valid, user if collection == "excerpts" else None)
 
 
 @app.patch("/api/{collection}/{item_id}")
 async def api_update(collection: str, item_id: str, request: Request):
-    require_permission(request, "content:write")
+    user = require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     existing = get_item(collection, item_id)
     if not existing:
         raise HTTPException(status_code=404, detail="记录不存在")
+    if collection == "excerpts" and not can_manage_excerpt(user, excerpt_owner_id(item_id)):
+        raise HTTPException(status_code=403, detail="只能修改自己的摘录")
     data = await request.json()
     if collection == "folders" and "sortOrder" in data:
         require_permission(request, "folders:manage")
     valid = validate(collection, {**existing, **data})
-    return update_item(collection, item_id, valid)
+    return update_item(collection, item_id, valid, user if collection == "excerpts" else None)
 
 
 @app.delete("/api/{collection}/{item_id}")
 def api_delete(collection: str, item_id: str, request: Request):
-    require_permission(request, "content:write")
+    user = require_permission(request, "content:write")
     if collection not in COLLECTIONS:
         raise HTTPException(status_code=404, detail="Not found")
     if collection == "folders":
@@ -1503,6 +1510,8 @@ def api_delete(collection: str, item_id: str, request: Request):
     existing = get_item(collection, item_id)
     if not existing:
         raise HTTPException(status_code=404, detail="记录不存在")
+    if collection == "excerpts" and not can_manage_excerpt(user, excerpt_owner_id(item_id)):
+        raise HTTPException(status_code=403, detail="只能删除自己的摘录")
     if collection == "folders" and folder_has_bookmarks(existing["name"]):
         raise HTTPException(status_code=409, detail="请先移动收藏夹内的网站")
     return delete_item(collection, item_id)

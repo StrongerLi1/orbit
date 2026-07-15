@@ -117,11 +117,13 @@ def initialize_database() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS todos (
                     id VARCHAR(64) PRIMARY KEY,
+                    owner_user_id VARCHAR(64) NULL DEFAULT NULL,
                     title VARCHAR(300) NOT NULL,
                     priority VARCHAR(20) NOT NULL,
                     due_date VARCHAR(20) NOT NULL,
                     completed TINYINT(1) NOT NULL DEFAULT 0,
-                    created_at VARCHAR(40) NOT NULL
+                    created_at VARCHAR(40) NOT NULL,
+                    INDEX idx_todos_owner_created (owner_user_id, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
@@ -129,6 +131,7 @@ def initialize_database() -> None:
                 """
                 CREATE TABLE IF NOT EXISTS plans (
                     id VARCHAR(64) PRIMARY KEY,
+                    owner_user_id VARCHAR(64) NULL DEFAULT NULL,
                     title VARCHAR(300) NOT NULL,
                     frequency_type VARCHAR(20) NOT NULL,
                     target_count INT NOT NULL,
@@ -138,14 +141,39 @@ def initialize_database() -> None:
                     time VARCHAR(10) NOT NULL,
                     duration INT NOT NULL,
                     color VARCHAR(20) NOT NULL,
-                    created_at VARCHAR(40) NOT NULL
+                    created_at VARCHAR(40) NOT NULL,
+                    INDEX idx_plans_owner_created (owner_user_id, created_at)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            for table in ("todos", "plans"):
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND COLUMN_NAME = 'owner_user_id'
+                    """,
+                    (settings.mysql_database, table),
+                )
+                if cursor.fetchone()["count"] == 0:
+                    cursor.execute(f"ALTER TABLE `{table}` ADD COLUMN owner_user_id VARCHAR(64) NULL DEFAULT NULL AFTER id")
+                index_name = f"idx_{table}_owner_created"
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM information_schema.STATISTICS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND INDEX_NAME = %s
+                    """,
+                    (settings.mysql_database, table, index_name),
+                )
+                if cursor.fetchone()["count"] == 0:
+                    cursor.execute(f"ALTER TABLE `{table}` ADD INDEX `{index_name}` (owner_user_id, created_at)")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS excerpts (
                     id VARCHAR(64) PRIMARY KEY,
+                    owner_user_id VARCHAR(64) NULL DEFAULT NULL,
+                    owner_name VARCHAR(64) NOT NULL DEFAULT 'admin',
                     content TEXT NOT NULL,
                     source VARCHAR(300) NOT NULL,
                     author VARCHAR(160) NOT NULL,
@@ -155,6 +183,20 @@ def initialize_database() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            for column, definition in {
+                "owner_user_id": "VARCHAR(64) NULL DEFAULT NULL AFTER id",
+                "owner_name": "VARCHAR(64) NOT NULL DEFAULT 'admin' AFTER owner_user_id",
+            }.items():
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'excerpts' AND COLUMN_NAME = %s
+                    """,
+                    (settings.mysql_database, column),
+                )
+                if cursor.fetchone()["count"] == 0:
+                    cursor.execute(f"ALTER TABLE excerpts ADD COLUMN {column} {definition}")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS books (
@@ -297,6 +339,27 @@ def initialize_database() -> None:
     from .auth import seed_admin_user, seed_rbac_defaults
     seed_rbac_defaults()
     seed_admin_user()
+    backfill_legacy_owners()
+
+
+def backfill_legacy_owners() -> None:
+    """Attach legacy user-owned content to the seeded admin."""
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, username FROM users WHERE username = %s LIMIT 1",
+                (settings.admin_username or "admin",),
+            )
+            admin = cursor.fetchone()
+            if not admin:
+                cursor.execute("SELECT id, username FROM users WHERE is_admin = 1 ORDER BY created_at ASC LIMIT 1")
+                admin = cursor.fetchone()
+            if admin:
+                for table in ("todos", "plans", "excerpts"):
+                    cursor.execute(
+                        f"UPDATE `{table}` SET owner_user_id = %s WHERE owner_user_id IS NULL OR owner_user_id = ''",
+                        (admin["id"],),
+                    )
 
 
 def migrate_from_json_if_empty(source: Path) -> None:
@@ -371,16 +434,16 @@ def replace_all(data: dict[str, list[dict[str, Any]]]) -> None:
                 )
             for todo in reversed(data["todos"]):
                 cursor.execute(
-                    "INSERT INTO todos (id, title, priority, due_date, completed, created_at) VALUES (%s, %s, %s, %s, %s, %s)",
-                    (todo.get("id") or str(uuid.uuid4()), todo.get("title", ""), todo.get("priority", "medium"), todo.get("dueDate", ""), 1 if todo.get("completed") else 0, todo.get("createdAt") or now_iso()),
+                    "INSERT INTO todos (id, owner_user_id, title, priority, due_date, completed, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (todo.get("id") or str(uuid.uuid4()), None, todo.get("title", ""), todo.get("priority", "medium"), todo.get("dueDate", ""), 1 if todo.get("completed") else 0, todo.get("createdAt") or now_iso()),
                 )
             for plan in reversed(data["plans"]):
                 cursor.execute(
-                    "INSERT INTO plans (id, title, frequency_type, target_count, start_date, end_date, completions, time, duration, color, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (plan.get("id") or str(uuid.uuid4()), plan.get("title", ""), plan.get("frequencyType", "daily"), int(plan.get("targetCount") or 1), plan.get("startDate") or local_date(), plan.get("endDate") or "", json.dumps(plan.get("completions") or {}, ensure_ascii=False), plan.get("time") or "09:00", int(plan.get("duration") or 30), plan.get("color") or "violet", plan.get("createdAt") or now_iso()),
+                    "INSERT INTO plans (id, owner_user_id, title, frequency_type, target_count, start_date, end_date, completions, time, duration, color, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (plan.get("id") or str(uuid.uuid4()), None, plan.get("title", ""), plan.get("frequencyType", "daily"), int(plan.get("targetCount") or 1), plan.get("startDate") or local_date(), plan.get("endDate") or "", json.dumps(plan.get("completions") or {}, ensure_ascii=False), plan.get("time") or "09:00", int(plan.get("duration") or 30), plan.get("color") or "violet", plan.get("createdAt") or now_iso()),
                 )
             for excerpt in reversed(data["excerpts"]):
                 cursor.execute(
-                    "INSERT INTO excerpts (id, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                    (excerpt.get("id") or str(uuid.uuid4()), excerpt.get("content", ""), excerpt.get("source", ""), excerpt.get("author", ""), excerpt.get("excerptDate", ""), excerpt.get("note", ""), excerpt.get("createdAt") or now_iso()),
+                    "INSERT INTO excerpts (id, owner_user_id, owner_name, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (excerpt.get("id") or str(uuid.uuid4()), None, "admin", excerpt.get("content", ""), excerpt.get("source", ""), excerpt.get("author", ""), excerpt.get("excerptDate", ""), excerpt.get("note", ""), excerpt.get("createdAt") or now_iso()),
                 )

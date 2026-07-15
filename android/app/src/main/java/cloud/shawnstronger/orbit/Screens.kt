@@ -230,11 +230,12 @@ fun BookmarksScreen(state: OrbitState) {
 @Composable
 fun ExcerptsScreen(state: OrbitState) {
     var add by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Excerpt?>(null) }
     var shuffled by remember { mutableStateOf<Excerpt?>(null) }
     val scope = rememberCoroutineScope()
     Page {
         SectionTitle("摘录", "保存值得重读的句子") {
-            Row { TextButton(onClick = { shuffled = state.excerpts.randomOrNull() }) { Text("随机一句") }; Button(onClick = { add = true }) { Text("添加") } }
+            Row { TextButton(onClick = { shuffled = state.excerpts.randomOrNull() }) { Text("随机一句") }; Button(onClick = { editing = null; add = true }) { Text("添加") } }
         }
         shuffled?.let { item ->
             Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.primary.copy(alpha = .1f), shape = MaterialTheme.shapes.medium) {
@@ -246,14 +247,24 @@ fun ExcerptsScreen(state: OrbitState) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(item.content, style = MaterialTheme.typography.titleMedium)
                     Text(listOf(item.author, item.source, item.excerptDate).filter(String::isNotBlank).joinToString(" · "), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${item.createdByName} 摘录", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (item.note.isNotBlank()) Text(item.note)
-                    TextButton(onClick = { scope.launch { state.deleteContent("excerpts", item.id) } }, modifier = Modifier.align(Alignment.End)) { Text("删除") }
+                    if (item.canManage) {
+                        Row(Modifier.align(Alignment.End)) {
+                            TextButton(onClick = { add = false; editing = item }) { Text("编辑") }
+                            TextButton(onClick = { scope.launch { state.deleteContent("excerpts", item.id) } }) { Text("删除") }
+                        }
+                    }
                 }
             }
         }
     }
-    if (add) ExcerptDialog({ add = false }) { content, author, source, date, note ->
-        scope.launch { if (state.addExcerpt(content, author, source, date, note)) add = false }
+    if (add || editing != null) ExcerptDialog(editing, { add = false; editing = null }) { content, author, source, date, note ->
+        scope.launch {
+            val success = editing?.let { state.updateExcerpt(it.id, content, author, source, date, note) }
+                ?: state.addExcerpt(content, author, source, date, note)
+            if (success) { add = false; editing = null }
+        }
     }
 }
 
@@ -622,9 +633,9 @@ private fun FolderDialog(folders: List<Folder>, selected: String, onDismiss: () 
 }
 
 @Composable
-private fun ExcerptDialog(onDismiss: () -> Unit, onSubmit: (String, String, String, String, String) -> Unit) {
-    var content by remember { mutableStateOf("") }; var author by remember { mutableStateOf("") }; var source by remember { mutableStateOf("") }; var date by remember { mutableStateOf(LocalDate.now().toString()) }; var note by remember { mutableStateOf("") }
-    FormDialog("添加摘录", onDismiss, content.isNotBlank(), { onSubmit(content, author, source, date, note) }) {
+private fun ExcerptDialog(item: Excerpt?, onDismiss: () -> Unit, onSubmit: (String, String, String, String, String) -> Unit) {
+    var content by remember(item?.id) { mutableStateOf(item?.content.orEmpty()) }; var author by remember(item?.id) { mutableStateOf(item?.author.orEmpty()) }; var source by remember(item?.id) { mutableStateOf(item?.source.orEmpty()) }; var date by remember(item?.id) { mutableStateOf(item?.excerptDate?.ifBlank { LocalDate.now().toString() } ?: LocalDate.now().toString()) }; var note by remember(item?.id) { mutableStateOf(item?.note.orEmpty()) }
+    FormDialog(if (item == null) "添加摘录" else "编辑摘录", onDismiss, content.isNotBlank(), { onSubmit(content, author, source, date, note) }) {
         OutlinedTextField(content, { content = it }, label = { Text("摘录内容") }, minLines = 4, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(author, { author = it }, label = { Text("作者") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(source, { source = it }, label = { Text("来源") }, modifier = Modifier.fillMaxWidth())

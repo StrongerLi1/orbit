@@ -928,24 +928,25 @@ function planHtml(p) { const progress = planProgress(p, dateKey()); const done =
 function timelineHtml(p) { const progress = planProgress(p, state.planDate); const todayCount = Number(p.completions?.[state.planDate] || 0); const done = progress.done >= progress.target; return `<div class="timeline-item recurring"><span class="plan-time">${p.time}</span><span class="plan-dot ${p.color}"></span><div><div class="plan-title-line"><h3 class="${done?'todo-title done':''}">${escapeHtml(p.title)}</h3><span class="type-pill">${planTypeLabels[p.frequencyType]}</span></div><p>${periodLabel(p)} ${progress.done}/${progress.target} 次 · 每次 ${p.duration} 分钟${todayCount ? ` · 今天 ${todayCount} 次` : ''}</p></div><div class="count-stepper"><button data-plan-count="-1" data-id="${p.id}" aria-label="减少 ${escapeHtml(p.title)} 打卡" ${todayCount ? '' : 'disabled'}>−</button><strong>${todayCount}</strong><button data-plan-count="1" data-id="${p.id}" aria-label="完成一次 ${escapeHtml(p.title)}">＋</button></div></div>`; }
 function todoHtml(t) { return `<div class="todo-item"><button class="check ${t.completed?'done':''}" data-toggle="todos" data-id="${t.id}">${t.completed?'✓':''}</button><span class="priority ${t.priority}"></span><span class="todo-title ${t.completed?'done':''}">${escapeHtml(t.title)}</span>${t.dueDate?`<span class="duration">${escapeHtml(t.dueDate)}</span>`:''}<button class="delete" data-delete="todos" data-id="${t.id}" aria-label="删除">×</button></div>`; }
 function bookmarkHtml(b) { return `<article class="bookmark-card"><div class="bookmark-top"><span class="site-icon">${escapeHtml(b.title[0])}</span><div><a href="${escapeHtml(b.url)}" target="_blank" rel="noreferrer"><h3>${escapeHtml(b.title)}</h3></a><span class="domain">${escapeHtml(host(b.url))}</span></div></div><p>${escapeHtml(b.note || '暂无备注')}</p><div class="bookmark-foot"><label class="folder-picker" title="更换收藏夹"><span>▣</span><select data-move-bookmark="${b.id}" aria-label="移动 ${escapeHtml(b.title)}">${folderOptions(b.category)}</select></label><div><button class="favorite ${b.favorite?'on':''}" data-favorite="${b.id}">★</button><button class="delete" data-delete="bookmarks" data-id="${b.id}">×</button></div></div></article>`; }
-function excerptHtml(excerpt) { const attribution = [excerpt.author, excerpt.source].filter(Boolean).join(' · '); return `<article class="excerpt-card"><span class="excerpt-mark">“</span><blockquote>${escapeHtml(excerpt.content)}</blockquote><div class="excerpt-meta"><div><strong>${escapeHtml(attribution || '未注明出处')}</strong><small>${escapeHtml(excerpt.excerptDate || '未填写日期')}</small></div><button class="delete" data-delete="excerpts" data-id="${excerpt.id}" aria-label="删除摘录">×</button></div>${excerpt.note ? `<p>${escapeHtml(excerpt.note)}</p>` : ''}</article>`; }
+function excerptHtml(excerpt) { const attribution = [excerpt.author, excerpt.source].filter(Boolean).join(' · '); const actions = excerpt.canManage ? `<div class="excerpt-actions"><button class="text-btn" data-edit="excerpts" data-id="${escapeHtml(excerpt.id)}">编辑</button><button class="delete" data-delete="excerpts" data-id="${escapeHtml(excerpt.id)}" aria-label="删除摘录">×</button></div>` : ''; return `<article class="excerpt-card"><span class="excerpt-mark">“</span><blockquote>${escapeHtml(excerpt.content)}</blockquote><div class="excerpt-meta"><div><strong>${escapeHtml(attribution || '未注明出处')}</strong><small>${escapeHtml(excerpt.excerptDate || '未填写日期')} · ${escapeHtml(excerpt.createdByName || 'admin')} 摘录</small></div>${actions}</div>${excerpt.note ? `<p>${escapeHtml(excerpt.note)}</p>` : ''}</article>`; }
 function netdiskResultHtml(item) { return `<article class="netdisk-card"><div><span class="label">${escapeHtml(netdiskSourceName(item.source) || 'NETDISK')}</span><h3><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></h3>${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}<div class="netdisk-meta">${[item.size, item.time, host(item.url)].filter(Boolean).map((value) => `<span>${escapeHtml(value)}</span>`).join('')}</div></div><a class="open-link" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">打开 →</a></article>`; }
 
 const forms = {
   bookmarks: { title:'添加网站', label:'NEW BOOKMARK', fields:() => `<div class="field"><label>名称</label><input name="title" required placeholder="例如：少数派"></div><div class="field"><label>网址</label><input name="url" type="url" required placeholder="https://"></div><div class="field"><label>收藏夹</label><select name="category" required>${folderOptions()}</select></div><div class="field"><label>备注</label><textarea name="note" placeholder="为什么收藏它？"></textarea></div>` },
-  excerpts: { title:'添加摘录', label:'NEW EXCERPT', fields:() => `<div class="field"><label>内容</label><textarea name="content" required maxlength="3000" placeholder="写下让你停顿的那句话…"></textarea></div><div class="form-row"><div class="field"><label>作者 / 歌手</label><input name="author" placeholder="例如：加缪、陈奕迅"></div><div class="field"><label>出处</label><input name="source" placeholder="书名、歌名、电影或其他来源"></div></div><div class="field"><label>摘录日期</label><input name="excerptDate" type="date" value="${dateKey()}"></div><div class="field"><label>备注（可选）</label><textarea name="note" maxlength="500" placeholder="当时的想法、页码或场景…"></textarea></div>` },
+  excerpts: { title:'添加摘录', label:'NEW EXCERPT', fields:(item = {}) => `<div class="field"><label>内容</label><textarea name="content" required maxlength="3000" placeholder="写下让你停顿的那句话…">${escapeHtml(item.content || '')}</textarea></div><div class="form-row"><div class="field"><label>作者 / 歌手</label><input name="author" value="${escapeHtml(item.author || '')}" placeholder="例如：加缪、陈奕迅"></div><div class="field"><label>出处</label><input name="source" value="${escapeHtml(item.source || '')}" placeholder="书名、歌名、电影或其他来源"></div></div><div class="field"><label>摘录日期</label><input name="excerptDate" type="date" value="${escapeHtml(item.excerptDate || dateKey())}"></div><div class="field"><label>备注（可选）</label><textarea name="note" maxlength="500" placeholder="当时的想法、页码或场景…">${escapeHtml(item.note || '')}</textarea></div>` },
   folders: { title:'新建收藏夹', label:'NEW COLLECTION', fields:`<div class="field"><label>收藏夹名称</label><input name="name" required maxlength="30" placeholder="例如：旅行灵感"></div>` },
   todos: { title:'添加待办', label:'NEW TO-DO', fields:`<div class="field"><label>待办内容</label><input name="title" required placeholder="我准备完成…"></div><div class="form-row"><div class="field"><label>优先级</label><select name="priority"><option value="medium">普通</option><option value="high">重要</option><option value="low">低</option></select></div><div class="field"><label>截止日期</label><input name="dueDate" type="date"></div></div>` },
   plans: { title:'制定计划', label:'NEW PLAN', fields:() => `<div class="field"><label>计划名称</label><input name="title" required placeholder="例如：晨间阅读"></div><div class="form-row"><div class="field"><label>计划类型</label><select name="frequencyType"><option value="daily">日常计划</option><option value="weekly">周常计划</option><option value="monthly">月度计划</option></select></div><div class="field"><label>每周期目标次数</label><input name="targetCount" type="number" min="1" max="99" value="1" required></div></div><div class="form-row"><div class="field"><label>开始日期</label><input name="startDate" type="date" required value="${state.planDate}"></div><div class="field"><label>结束日期（可选）</label><input name="endDate" type="date"></div></div><div class="form-row"><div class="field"><label>提醒时间</label><input name="time" type="time" required value="09:00"></div><div class="field"><label>每次时长（分钟）</label><input name="duration" type="number" min="5" max="480" value="30"></div></div><div class="field"><label>标记颜色</label><select name="color"><option value="violet">紫色</option><option value="orange">橙色</option><option value="green">绿色</option><option value="blue">蓝色</option></select></div>` }
 };
 
-function openModal(type) {
+function openModal(type, item = null) {
   const config = forms[type];
-  $('#modal-title').textContent = config.title; $('#modal-label').textContent = config.label; $('#form-fields').innerHTML = typeof config.fields === 'function' ? config.fields() : config.fields;
-  $('#item-form').dataset.type = type; $('#modal').hidden = false; $('#quick-menu').hidden = true;
+  const editing = Boolean(item?.id);
+  $('#modal-title').textContent = editing ? `编辑${type === 'excerpts' ? '摘录' : '项目'}` : config.title; $('#modal-label').textContent = editing ? 'EDIT EXCERPT' : config.label; $('#form-fields').innerHTML = typeof config.fields === 'function' ? config.fields(item || {}) : config.fields;
+  $('#item-form').dataset.type = type; $('#item-form').dataset.id = item?.id || ''; $('#modal').hidden = false; $('#quick-menu').hidden = true;
   setTimeout(() => $('#item-form input')?.focus(), 50);
 }
-function closeModal() { $('#modal').hidden = true; $('#item-form').reset(); }
+function closeModal() { $('#modal').hidden = true; $('#item-form').reset(); delete $('#item-form').dataset.id; }
 function toast(message) { const el=$('#toast'); el.textContent=message; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1800); }
 
 document.addEventListener('click', async (event) => {
@@ -1016,6 +1017,13 @@ document.addEventListener('click', async (event) => {
     } catch (error) {
       toast(error.message);
     }
+    return;
+  }
+  const edit = event.target.closest('[data-edit]');
+  if (edit) {
+    const item = state[edit.dataset.edit]?.find((entry) => entry.id === edit.dataset.id);
+    if (!item?.canManage) { toast('没有编辑权限'); return; }
+    openModal(edit.dataset.edit, item);
     return;
   }
   const category = event.target.closest('[data-category]'); if (category) { state.category=category.dataset.category; render(); }
@@ -1154,10 +1162,11 @@ document.addEventListener('click', async (event) => {
 });
 
 $('#item-form').addEventListener('submit', async (event) => {
-  event.preventDefault(); const type=event.currentTarget.dataset.type; const payload=Object.fromEntries(new FormData(event.currentTarget));
+  event.preventDefault(); const form = event.currentTarget; const type=form.dataset.type; const itemId=form.dataset.id; const payload=Object.fromEntries(new FormData(form));
   if (payload.duration) payload.duration=Number(payload.duration);
   if (payload.targetCount) payload.targetCount=Number(payload.targetCount);
-  await mutate(()=>request(`/api/${type}`,{method:'POST',body:JSON.stringify(payload)}),'已添加'); closeModal();
+  const editing = Boolean(itemId);
+  await mutate(()=>request(`/api/${type}${editing ? `/${itemId}` : ''}`,{method:editing ? 'PATCH' : 'POST',body:JSON.stringify(payload)}), editing ? '已更新' : '已添加'); closeModal();
 });
 $('#library-book-form').addEventListener('submit', async (event) => {
   event.preventDefault();

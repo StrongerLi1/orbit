@@ -118,6 +118,14 @@ class OrbitState(val client: OrbitClient) {
         )
     }
 
+    suspend fun updateExcerpt(id: String, content: String, author: String, source: String, date: String, note: String) = mutate {
+        client.patch(
+            "excerpts",
+            id,
+            JSONObject().put("content", content).put("author", author).put("source", source).put("excerptDate", date).put("note", note),
+        )
+    }
+
     suspend fun addTodo(title: String, priority: String, dueDate: String) = mutate {
         client.create("todos", JSONObject().put("title", title).put("priority", priority).put("dueDate", dueDate))
     }

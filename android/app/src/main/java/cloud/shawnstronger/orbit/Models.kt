@@ -59,6 +59,8 @@ data class Excerpt(
     val excerptDate: String,
     val note: String,
     val createdAt: String,
+    val createdByName: String = "admin",
+    val canManage: Boolean = false,
 )
 data class ContentBundle(
     val bookmarks: List<Bookmark>,
@@ -194,6 +196,7 @@ object OrbitJson {
     fun excerpt(obj: JSONObject) = Excerpt(
         obj.text("id"), obj.text("content"), obj.text("source"), obj.text("author"),
         obj.text("excerptDate"), obj.text("note"), obj.text("createdAt"),
+        obj.text("createdByName", "admin"), obj.optBoolean("canManage", false),
     )
 
     fun netdisk(raw: String): NetdiskSearch {

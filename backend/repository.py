@@ -6,6 +6,15 @@ from typing import Any
 from .database import connection, now_iso
 
 
+USER_SCOPED_COLLECTIONS = frozenset({"todos", "plans"})
+
+
+def _required_owner_id(collection: str, current_user_id: str) -> str:
+    if collection in USER_SCOPED_COLLECTIONS and not current_user_id:
+        raise ValueError(f"{collection} 必须绑定当前用户")
+    return current_user_id
+
+
 def _plan_row(row: dict[str, Any]) -> dict[str, Any]:
     completions = row["completions"]
     if isinstance(completions, str):
@@ -25,12 +34,27 @@ def _plan_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _excerpt_row(row: dict[str, Any], current_user_id: str = "", is_admin: bool = False) -> dict[str, Any]:
+    owner_user_id = row.get("owner_user_id") or ""
+    return {
+        "id": row["id"],
+        "content": row["content"],
+        "source": row["source"],
+        "author": row["author"],
+        "excerptDate": row["excerpt_date"],
+        "note": row["note"],
+        "createdAt": row["created_at"],
+        "createdByName": row.get("owner_name") or "admin",
+        "canManage": is_admin or bool(current_user_id and owner_user_id == current_user_id),
+    }
+
+
 ROW_MAPPERS = {
     "folders": lambda row: {"id": row["id"], "name": row["name"], "sortOrder": row["sort_order"], "createdAt": row["created_at"]},
     "bookmarks": lambda row: {"id": row["id"], "title": row["title"], "url": row["url"], "category": row["category"], "note": row["note"], "favorite": bool(row["favorite"]), "createdAt": row["created_at"]},
     "todos": lambda row: {"id": row["id"], "title": row["title"], "priority": row["priority"], "dueDate": row["due_date"], "completed": bool(row["completed"]), "createdAt": row["created_at"]},
     "plans": _plan_row,
-    "excerpts": lambda row: {"id": row["id"], "content": row["content"], "source": row["source"], "author": row["author"], "excerptDate": row["excerpt_date"], "note": row["note"], "createdAt": row["created_at"]},
+    "excerpts": _excerpt_row,
 }
 
 
@@ -43,22 +67,44 @@ ORDERS = {
 }
 
 
-def list_items(collection: str) -> list[dict[str, Any]]:
+def list_items(collection: str, current_user_id: str = "", is_admin: bool = False) -> list[dict[str, Any]]:
+    owner_user_id = _required_owner_id(collection, current_user_id)
     with connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM `{collection}` ORDER BY {ORDERS[collection]}")
-            return [ROW_MAPPERS[collection](row) for row in cursor.fetchall()]
+            if collection in USER_SCOPED_COLLECTIONS:
+                cursor.execute(
+                    f"SELECT * FROM `{collection}` WHERE owner_user_id = %s ORDER BY {ORDERS[collection]}",
+                    (owner_user_id,),
+                )
+            elif collection == "excerpts":
+                cursor.execute("SELECT e.* FROM excerpts e ORDER BY created_at DESC")
+            else:
+                cursor.execute(f"SELECT * FROM `{collection}` ORDER BY {ORDERS[collection]}")
+            return [ROW_MAPPERS[collection](row, current_user_id, is_admin) if collection == "excerpts" else ROW_MAPPERS[collection](row) for row in cursor.fetchall()]
 
 
-def get_item(collection: str, item_id: str) -> dict[str, Any] | None:
+def get_item(collection: str, item_id: str, current_user_id: str = "", is_admin: bool = False) -> dict[str, Any] | None:
+    owner_user_id = _required_owner_id(collection, current_user_id)
     with connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM `{collection}` WHERE id = %s", (item_id,))
+            if collection in USER_SCOPED_COLLECTIONS:
+                cursor.execute(
+                    f"SELECT * FROM `{collection}` WHERE id = %s AND owner_user_id = %s",
+                    (item_id, owner_user_id),
+                )
+            elif collection == "excerpts":
+                cursor.execute("SELECT e.* FROM excerpts e WHERE e.id = %s", (item_id,))
+            else:
+                cursor.execute(f"SELECT * FROM `{collection}` WHERE id = %s", (item_id,))
             row = cursor.fetchone()
-            return ROW_MAPPERS[collection](row) if row else None
+            if not row:
+                return None
+            return ROW_MAPPERS[collection](row, current_user_id, is_admin) if collection == "excerpts" else ROW_MAPPERS[collection](row)
 
 
-def create_item(collection: str, item: dict[str, Any]) -> dict[str, Any]:
+def create_item(collection: str, item: dict[str, Any], current_user: dict[str, Any] | None = None) -> dict[str, Any]:
+    current_user_id = current_user.get("id", "") if current_user else ""
+    owner_user_id = _required_owner_id(collection, current_user_id)
     created_at = now_iso()
     item_id = str(uuid.uuid4())
     with connection() as conn:
@@ -70,16 +116,26 @@ def create_item(collection: str, item: dict[str, Any]) -> dict[str, Any]:
             elif collection == "bookmarks":
                 cursor.execute("INSERT INTO bookmarks (id, title, url, category, note, favorite, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)", (item_id, item["title"], item["url"], item["category"], item["note"], 1 if item["favorite"] else 0, created_at))
             elif collection == "todos":
-                cursor.execute("INSERT INTO todos (id, title, priority, due_date, completed, created_at) VALUES (%s, %s, %s, %s, %s, %s)", (item_id, item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, created_at))
+                cursor.execute("INSERT INTO todos (id, owner_user_id, title, priority, due_date, completed, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)", (item_id, owner_user_id, item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, created_at))
             elif collection == "plans":
-                cursor.execute("INSERT INTO plans (id, title, frequency_type, target_count, start_date, end_date, completions, time, duration, color, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (item_id, item["title"], item["frequencyType"], item["targetCount"], item["startDate"], item["endDate"], json.dumps(item["completions"], ensure_ascii=False), item["time"], item["duration"], item["color"], created_at))
+                cursor.execute("INSERT INTO plans (id, owner_user_id, title, frequency_type, target_count, start_date, end_date, completions, time, duration, color, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (item_id, owner_user_id, item["title"], item["frequencyType"], item["targetCount"], item["startDate"], item["endDate"], json.dumps(item["completions"], ensure_ascii=False), item["time"], item["duration"], item["color"], created_at))
             elif collection == "excerpts":
-                cursor.execute("INSERT INTO excerpts (id, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)", (item_id, item["content"], item["source"], item["author"], item["excerptDate"], item["note"], created_at))
+                if not current_user:
+                    raise ValueError("摘录必须绑定当前用户")
+                cursor.execute(
+                    "INSERT INTO excerpts (id, owner_user_id, owner_name, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (item_id, current_user["id"], current_user["username"], item["content"], item["source"], item["author"], item["excerptDate"], item["note"], created_at),
+                )
+    if current_user:
+        return get_item(collection, item_id, current_user_id, "users:manage" in current_user.get("permissions", []))
     return get_item(collection, item_id)
 
 
-def update_item(collection: str, item_id: str, item: dict[str, Any]) -> dict[str, Any] | None:
-    if not get_item(collection, item_id):
+def update_item(collection: str, item_id: str, item: dict[str, Any], current_user: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    current_user_id = current_user.get("id", "") if current_user else ""
+    is_admin = bool(current_user and "users:manage" in current_user.get("permissions", []))
+    owner_user_id = _required_owner_id(collection, current_user_id)
+    if not get_item(collection, item_id, current_user_id, is_admin):
         return None
     with connection() as conn:
         with conn.cursor() as cursor:
@@ -88,22 +144,36 @@ def update_item(collection: str, item_id: str, item: dict[str, Any]) -> dict[str
             elif collection == "bookmarks":
                 cursor.execute("UPDATE bookmarks SET title = %s, url = %s, category = %s, note = %s, favorite = %s WHERE id = %s", (item["title"], item["url"], item["category"], item["note"], 1 if item["favorite"] else 0, item_id))
             elif collection == "todos":
-                cursor.execute("UPDATE todos SET title = %s, priority = %s, due_date = %s, completed = %s WHERE id = %s", (item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, item_id))
+                cursor.execute("UPDATE todos SET title = %s, priority = %s, due_date = %s, completed = %s WHERE id = %s AND owner_user_id = %s", (item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, item_id, owner_user_id))
             elif collection == "plans":
-                cursor.execute("UPDATE plans SET title = %s, frequency_type = %s, target_count = %s, start_date = %s, end_date = %s, completions = %s, time = %s, duration = %s, color = %s WHERE id = %s", (item["title"], item["frequencyType"], item["targetCount"], item["startDate"], item["endDate"], json.dumps(item["completions"], ensure_ascii=False), item["time"], item["duration"], item["color"], item_id))
+                cursor.execute("UPDATE plans SET title = %s, frequency_type = %s, target_count = %s, start_date = %s, end_date = %s, completions = %s, time = %s, duration = %s, color = %s WHERE id = %s AND owner_user_id = %s", (item["title"], item["frequencyType"], item["targetCount"], item["startDate"], item["endDate"], json.dumps(item["completions"], ensure_ascii=False), item["time"], item["duration"], item["color"], item_id, owner_user_id))
             elif collection == "excerpts":
                 cursor.execute("UPDATE excerpts SET content = %s, source = %s, author = %s, excerpt_date = %s, note = %s WHERE id = %s", (item["content"], item["source"], item["author"], item["excerptDate"], item["note"], item_id))
-    return get_item(collection, item_id)
+    return get_item(collection, item_id, current_user_id, is_admin)
 
 
-def delete_item(collection: str, item_id: str) -> dict[str, Any] | None:
-    item = get_item(collection, item_id)
+def delete_item(collection: str, item_id: str, current_user: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    current_user_id = current_user.get("id", "") if current_user else ""
+    is_admin = bool(current_user and "users:manage" in current_user.get("permissions", []))
+    owner_user_id = _required_owner_id(collection, current_user_id)
+    item = get_item(collection, item_id, current_user_id, is_admin)
     if not item:
         return None
     with connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute(f"DELETE FROM `{collection}` WHERE id = %s", (item_id,))
+            if collection in USER_SCOPED_COLLECTIONS:
+                cursor.execute(f"DELETE FROM `{collection}` WHERE id = %s AND owner_user_id = %s", (item_id, owner_user_id))
+            else:
+                cursor.execute(f"DELETE FROM `{collection}` WHERE id = %s", (item_id,))
     return item
+
+
+def excerpt_owner_id(item_id: str) -> str | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT owner_user_id FROM excerpts WHERE id = %s", (item_id,))
+            row = cursor.fetchone()
+            return row["owner_user_id"] if row else None
 
 
 def folder_exists(name: str) -> bool:
