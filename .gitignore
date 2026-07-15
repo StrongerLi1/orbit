@@ -23,3 +23,8 @@ android/**/build/
 deploy/lxserver/lxserver.env
 deploy/lxserver/data/
 deploy/lxserver/logs/
+
+# Trellis local files
+.trellis/
+.agents/
+.codex/
