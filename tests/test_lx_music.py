@@ -40,7 +40,8 @@ def main() -> None:
     assert "location.replace(publicUrl)" in app_source
     assert "authReturnTarget === 'music' ? '/?next=music' : '/'" in app_source
     assert 'id="lx-music-nav"' in html
-    assert 'target="_blank" rel="noopener noreferrer"' in html
+    lx_nav = next(line for line in html.splitlines() if 'id="lx-music-nav"' in line)
+    assert 'target=' not in lx_nav
     assert "auth_request /_orbit_lx_auth;" in nginx
     assert "return 302 https://shawnstronger.cloud/?next=music;" in nginx
     assert "return 308 https://shawnstronger.cloud$request_uri;" in nginx
