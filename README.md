@@ -61,7 +61,7 @@ npm start
 
 登录态使用双 JWT：短期 access token 放 HttpOnly Cookie，长期 refresh token 放 HttpOnly Cookie，并在 Redis 中保存 refresh token 的 jti，用于续期和退出登录时失效。
 
-用户权限使用固定 RBAC 角色：`admin` 拥有全部权限，`user` 可以使用共享业务功能、网盘搜索和 Hermes 聊天。当前版本保留公开注册，新用户默认获得 `user` 角色；业务数据仍然是共享数据，Hermes 聊天会话按用户隔离保存。
+用户权限使用固定 RBAC 角色：`admin` 拥有全部权限，`user` 可以使用业务功能、网盘搜索和 Hermes 聊天。当前版本保留公开注册，新用户默认获得 `user` 角色；收藏和收藏夹仍是共享数据，待办、计划和 Hermes 聊天会话按用户隔离，摘录对所有用户可读但只有摘录人本人或管理员可以编辑、删除。
 
 登录系统的完整设计和开发说明见 [`docs/auth-system.md`](docs/auth-system.md)。RBAC 的设计原理和授权逻辑见 [`docs/rbac-design.md`](docs/rbac-design.md)。
 
