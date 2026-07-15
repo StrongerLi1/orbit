@@ -959,3 +959,37 @@ Implemented and deployed shared library independent book reviews; all tests and 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: 实现摘录与书评匿名功能
+
+**Date**: 2026-07-15
+**Task**: 实现摘录与书评匿名功能
+**Branch**: `main`
+
+### Summary
+
+完成 Web 端摘录和书评匿名展示：新增数据库匿名字段、按当前用户投影显示名、作者权限控制、书评匿名切换 API、摘录/书评表单与列表标识；Android 暂不纳入。通过 npm test、Python 编译和 Node 语法检查。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a90325a` | (see git log) |
+| `e0e59a5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
