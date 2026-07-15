@@ -1,4 +1,6 @@
 import codecs
+import io
+import math
 import os
 import posixpath
 import re
@@ -11,6 +13,7 @@ from xml.etree import ElementTree
 
 from fastapi import HTTPException, UploadFile
 from pypdf import PdfReader
+import pypdfium2 as pdfium
 
 from .config import settings
 
@@ -28,6 +31,9 @@ _EPUB_XML_LIMIT = 1024 * 1024
 _MOBI_RECORD0_LIMIT = 1024 * 1024
 _MOBI_TEXT_LIMIT = 64 * 1024
 _MOBI_EXTH_RECORD_LIMIT = 4096
+_PDF_COVER_MAX_EDGE = 1600
+_PDF_COVER_MAX_SCALE = 2.0
+_PDF_COVER_QUALITY = 85
 
 
 def ensure_library_storage() -> None:
@@ -252,17 +258,55 @@ def _epub_metadata(path: Path, max_cover_bytes: int) -> dict[str, Any]:
         return {}
 
 
-def _pdf_metadata(path: Path) -> dict[str, str]:
+def _pdf_metadata(path: Path, max_cover_bytes: int) -> dict[str, Any]:
+    result: dict[str, Any] = {}
     try:
         reader = PdfReader(path, strict=False)
-        if reader.is_encrypted or reader.metadata is None:
-            return {}
-        return {
-            "title": re.sub(r"\s+", " ", str(reader.metadata.title or "")).strip(),
-            "author": re.sub(r"\s+", " ", str(reader.metadata.author or "")).strip(),
-        }
+        if not reader.is_encrypted and reader.metadata is not None:
+            result.update({
+                "title": re.sub(r"\s+", " ", str(reader.metadata.title or "")).strip(),
+                "author": re.sub(r"\s+", " ", str(reader.metadata.author or "")).strip(),
+            })
     except Exception:
-        return {}
+        pass
+
+    document = None
+    page = None
+    bitmap = None
+    image = None
+    try:
+        document = pdfium.PdfDocument(path)
+        if len(document) == 0:
+            return result
+        page = document[0]
+        width, height = page.get_size()
+        largest_edge = max(width, height)
+        if not math.isfinite(largest_edge) or largest_edge <= 0:
+            return result
+        scale = min(_PDF_COVER_MAX_SCALE, _PDF_COVER_MAX_EDGE / largest_edge)
+        bitmap = page.render(scale=scale, fill_color=(255, 255, 255, 255))
+        image = bitmap.to_pil().convert("RGB")
+        output = io.BytesIO()
+        image.save(output, format="JPEG", quality=_PDF_COVER_QUALITY, optimize=True)
+        cover = output.getvalue()
+        if 0 < len(cover) <= max_cover_bytes:
+            result.update({
+                "coverBytes": cover,
+                "coverExtension": "jpg",
+                "coverContentType": "image/jpeg",
+            })
+    except Exception:
+        pass
+    finally:
+        if image is not None:
+            image.close()
+        if bitmap is not None:
+            bitmap.close()
+        if page is not None:
+            page.close()
+        if document is not None:
+            document.close()
+    return result
 
 
 def _big_endian(data: bytes, offset: int, size: int) -> int:
@@ -396,7 +440,7 @@ def extract_book_metadata(
     if file_format == "epub":
         embedded = _epub_metadata(path, max_cover_bytes)
     elif file_format == "pdf":
-        embedded = _pdf_metadata(path)
+        embedded = _pdf_metadata(path, max_cover_bytes)
     elif file_format == "azw3":
         embedded = _azw3_metadata(path, max_cover_bytes)
     for key in ("title", "author"):

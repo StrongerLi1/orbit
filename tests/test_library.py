@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import HTTPException, UploadFile
+from PIL import Image
 from pypdf import PdfWriter
 
 import backend.main as main_module
@@ -63,11 +64,19 @@ def epub_bytes(title: str = "内嵌书名", author: str = "内嵌作者") -> byt
     return buffer.getvalue()
 
 
-def pdf_bytes(title: str = "PDF 内嵌书名", author: str = "PDF 内嵌作者") -> bytes:
+def pdf_bytes(
+    title: str = "PDF 内嵌书名",
+    author: str = "PDF 内嵌作者",
+    pages: tuple[tuple[float, float], ...] = ((100, 100),),
+    password: str = "",
+) -> bytes:
     buffer = io.BytesIO()
     writer = PdfWriter()
-    writer.add_blank_page(width=100, height=100)
+    for width, height in pages:
+        writer.add_blank_page(width=width, height=height)
     writer.add_metadata({"/Title": title, "/Author": author})
+    if password:
+        writer.encrypt(password)
     writer.write(buffer)
     return buffer.getvalue()
 
@@ -191,9 +200,49 @@ def test_metadata_extraction(root: Path) -> None:
 
     pdf = root / "文件名 - 文件作者.pdf"
     pdf.write_bytes(pdf_bytes())
-    metadata = extract_book_metadata(pdf, pdf.name, "pdf", 1024)
+    metadata = extract_book_metadata(pdf, pdf.name, "pdf", 1024 * 1024)
     assert metadata["title"] == "PDF 内嵌书名"
     assert metadata["author"] == "PDF 内嵌作者"
+    assert metadata["coverBytes"].startswith(b"\xff\xd8\xff")
+    assert metadata["coverContentType"] == "image/jpeg"
+    with Image.open(io.BytesIO(metadata["coverBytes"])) as cover:
+        assert cover.format == "JPEG"
+        assert cover.size == (200, 200)
+        assert cover.getpixel((0, 0)) == (255, 255, 255)
+    assert "coverBytes" not in extract_book_metadata(pdf, pdf.name, "pdf", 4)
+
+    multipage = root / "多页.pdf"
+    multipage.write_bytes(pdf_bytes(pages=((400, 800), (1000, 100))))
+    metadata = extract_book_metadata(multipage, multipage.name, "pdf", 1024 * 1024)
+    with Image.open(io.BytesIO(metadata["coverBytes"])) as cover:
+        assert cover.size == (800, 1600)
+
+    oversized_page = root / "超大页面.pdf"
+    oversized_page.write_bytes(pdf_bytes(pages=((10000, 5000),)))
+    metadata = extract_book_metadata(oversized_page, oversized_page.name, "pdf", 1024 * 1024)
+    with Image.open(io.BytesIO(metadata["coverBytes"])) as cover:
+        assert cover.size == (1600, 800)
+
+    encrypted_pdf = root / "加密文件 - 文件作者.pdf"
+    encrypted_pdf.write_bytes(pdf_bytes(password="secret"))
+    assert extract_book_metadata(encrypted_pdf, encrypted_pdf.name, "pdf", 1024 * 1024) == {
+        "title": "加密文件",
+        "author": "文件作者",
+    }
+
+    malformed_pdf = root / "损坏文件 - 文件作者.pdf"
+    malformed_pdf.write_bytes(b"%PDF-1.7\nmalformed")
+    assert extract_book_metadata(malformed_pdf, malformed_pdf.name, "pdf", 1024 * 1024) == {
+        "title": "损坏文件",
+        "author": "文件作者",
+    }
+
+    empty_pdf = root / "空白文件 - 文件作者.pdf"
+    empty_pdf.write_bytes(pdf_bytes(pages=()))
+    metadata = extract_book_metadata(empty_pdf, empty_pdf.name, "pdf", 1024 * 1024)
+    assert metadata["title"] == "PDF 内嵌书名"
+    assert metadata["author"] == "PDF 内嵌作者"
+    assert "coverBytes" not in metadata
 
     azw3 = root / "文件书名 - 文件作者.azw3"
     azw3.write_bytes(azw3_bytes())
@@ -311,6 +360,15 @@ def test_upload_route_cleanup(root: Path) -> None:
             cover_file=None,
         )
 
+    async def pdf_auto_upload() -> dict:
+        return await main_module.library_upload_book(
+            FakeRequest(),
+            title="",
+            author="",
+            book_file=UploadFile(filename="错误文件名 - 错误作者.pdf", file=io.BytesIO(pdf_bytes())),
+            cover_file=None,
+        )
+
     async def azw3_manual_upload() -> dict:
         return await main_module.library_upload_book(
             FakeRequest(),
@@ -336,6 +394,14 @@ def test_upload_route_cleanup(root: Path) -> None:
         assert result["title"] == "内嵌书名"
         assert result["author"] == "内嵌作者"
         assert cover_path(created["coverFilename"]).read_bytes() == b"\xff\xd8\xff\xe0embedded-cover"
+        assert not any((settings.library_storage_dir / "tmp").iterdir())
+
+        settings.library_storage_dir = root / "pdf-auto"
+        created.clear()
+        result = asyncio.run(pdf_auto_upload())
+        assert result["title"] == "PDF 内嵌书名"
+        assert result["author"] == "PDF 内嵌作者"
+        assert cover_path(created["coverFilename"]).read_bytes().startswith(b"\xff\xd8\xff")
         assert not any((settings.library_storage_dir / "tmp").iterdir())
 
         settings.library_storage_dir = root / "azw3-manual"
