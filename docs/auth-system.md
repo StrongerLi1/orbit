@@ -294,7 +294,7 @@ Cookie 配置：
 - `GET /api/netdisk/search`
 - 对应的 `PATCH`、`DELETE`
 
-收藏、收藏夹和摘录保持共享读取；待办和计划按认证用户 UID 严格隔离，管理员也不能读取或修改他人的记录。摘录响应包含 `createdByName` 和 `canManage`，普通用户只能修改自己的摘录，管理员可以管理全部摘录。客户端传入的归属字段不会生效。
+收藏、收藏夹和摘录保持共享读取；待办和计划按认证用户 UID 严格隔离，管理员也不能读取或修改他人的记录。摘录响应包含 `createdByName`、`isAnonymous` 和 `canManage`；匿名摘录对其他普通用户显示“匿名用户”，作者本人仍看到真实用户名和匿名标识。普通用户只能修改自己的摘录，管理员可以管理全部摘录。客户端传入的归属字段不会生效。
 
 `require_user` 只认 access token，不会直接使用 refresh token 访问业务数据。access token 过期时，前端负责先调用 refresh 接口，再重试原请求。
 
