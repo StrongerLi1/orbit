@@ -341,6 +341,7 @@ function openLibraryReadModal(bookId, record = null) {
   const form = $('#library-read-form');
   form.elements.readDate.value = record?.readDate || dateKey();
   form.elements.review.value = '';
+  form.elements.reviewAnonymous.checked = false;
   $('#library-read-review-field').hidden = Boolean(record);
   $('#library-readers-modal').hidden = true;
   $('#library-read-modal').hidden = false;
@@ -385,9 +386,9 @@ function renderLibraryReviews() {
     return;
   }
   container.innerHTML = reviews.map((review) => `<article class="library-review">
-    <div class="library-review-head"><strong>${escapeHtml(review.username)}${review.canDelete && review.username === state.user?.username ? ' · 我' : ''}</strong><time datetime="${escapeHtml(review.createdAt)}">${escapeHtml(review.createdAt)}</time></div>
+    <div class="library-review-head"><strong>${escapeHtml(review.username)}${review.canDelete && review.username === state.user?.username ? ' · 我' : ''}${review.isAnonymous && review.canToggleAnonymous ? ' · 匿名' : ''}</strong><time datetime="${escapeHtml(review.createdAt)}">${escapeHtml(review.createdAt)}</time></div>
     <p>${escapeHtml(review.content)}</p>
-    ${review.canDelete ? `<button class="library-review-delete" data-library-review-delete="${escapeHtml(review.id)}">删除</button>` : ''}
+    <div class="library-review-actions">${review.canToggleAnonymous ? `<button class="library-review-toggle" data-library-review-toggle="${escapeHtml(review.id)}" data-library-review-anonymous="${review.isAnonymous ? 'true' : 'false'}">${review.isAnonymous ? '取消匿名' : '设为匿名'}</button>` : ''}${review.canDelete ? `<button class="library-review-delete" data-library-review-delete="${escapeHtml(review.id)}">删除</button>` : ''}</div>
   </article>`).join('') || empty('还没有书评，来留下第一条吧');
 }
 
@@ -964,12 +965,12 @@ function planHtml(p) { const progress = planProgress(p, dateKey()); const done =
 function timelineHtml(p) { const progress = planProgress(p, state.planDate); const todayCount = Number(p.completions?.[state.planDate] || 0); const done = progress.done >= progress.target; return `<div class="timeline-item recurring"><span class="plan-time">${p.time}</span><span class="plan-dot ${p.color}"></span><div><div class="plan-title-line"><h3 class="${done?'todo-title done':''}">${escapeHtml(p.title)}</h3><span class="type-pill">${planTypeLabels[p.frequencyType]}</span></div><p>${periodLabel(p)} ${progress.done}/${progress.target} 次 · 每次 ${p.duration} 分钟${todayCount ? ` · 今天 ${todayCount} 次` : ''}</p></div><div class="count-stepper"><button data-plan-count="-1" data-id="${p.id}" aria-label="减少 ${escapeHtml(p.title)} 打卡" ${todayCount ? '' : 'disabled'}>−</button><strong>${todayCount}</strong><button data-plan-count="1" data-id="${p.id}" aria-label="完成一次 ${escapeHtml(p.title)}">＋</button></div></div>`; }
 function todoHtml(t) { return `<div class="todo-item"><button class="check ${t.completed?'done':''}" data-toggle="todos" data-id="${t.id}">${t.completed?'✓':''}</button><span class="priority ${t.priority}"></span><span class="todo-title ${t.completed?'done':''}">${escapeHtml(t.title)}</span>${t.dueDate?`<span class="duration">${escapeHtml(t.dueDate)}</span>`:''}<button class="delete" data-delete="todos" data-id="${t.id}" aria-label="删除">×</button></div>`; }
 function bookmarkHtml(b) { return `<article class="bookmark-card"><div class="bookmark-top"><span class="site-icon">${escapeHtml(b.title[0])}</span><div><a href="${escapeHtml(b.url)}" target="_blank" rel="noreferrer"><h3>${escapeHtml(b.title)}</h3></a><span class="domain">${escapeHtml(host(b.url))}</span></div></div><p>${escapeHtml(b.note || '暂无备注')}</p><div class="bookmark-foot"><label class="folder-picker" title="更换收藏夹"><span>▣</span><select data-move-bookmark="${b.id}" aria-label="移动 ${escapeHtml(b.title)}">${folderOptions(b.category)}</select></label><div><button class="favorite ${b.favorite?'on':''}" data-favorite="${b.id}">★</button><button class="delete" data-delete="bookmarks" data-id="${b.id}">×</button></div></div></article>`; }
-function excerptHtml(excerpt) { const attribution = [excerpt.author, excerpt.source].filter(Boolean).join(' · '); const actions = excerpt.canManage ? `<div class="excerpt-actions"><button class="text-btn" data-edit="excerpts" data-id="${escapeHtml(excerpt.id)}">编辑</button><button class="delete" data-delete="excerpts" data-id="${escapeHtml(excerpt.id)}" aria-label="删除摘录">×</button></div>` : ''; return `<article class="excerpt-card"><span class="excerpt-mark">“</span><blockquote>${escapeHtml(excerpt.content)}</blockquote><div class="excerpt-meta"><div><strong>${escapeHtml(attribution || '未注明出处')}</strong><small>${escapeHtml(excerpt.excerptDate || '未填写日期')} · ${escapeHtml(excerpt.createdByName || 'admin')} 摘录</small></div>${actions}</div>${excerpt.note ? `<p>${escapeHtml(excerpt.note)}</p>` : ''}</article>`; }
+function excerptHtml(excerpt) { const attribution = [excerpt.author, excerpt.source].filter(Boolean).join(' · '); const author = `${excerpt.createdByName || 'admin'}${excerpt.isAnonymous && excerpt.canToggleAnonymous ? ' · 匿名' : ''}`; const actions = excerpt.canManage ? `<div class="excerpt-actions"><button class="text-btn" data-edit="excerpts" data-id="${escapeHtml(excerpt.id)}">编辑</button><button class="delete" data-delete="excerpts" data-id="${escapeHtml(excerpt.id)}" aria-label="删除摘录">×</button></div>` : ''; return `<article class="excerpt-card"><span class="excerpt-mark">“</span><blockquote>${escapeHtml(excerpt.content)}</blockquote><div class="excerpt-meta"><div><strong>${escapeHtml(attribution || '未注明出处')}</strong><small>${escapeHtml(excerpt.excerptDate || '未填写日期')} · ${escapeHtml(author)} 摘录</small></div>${actions}</div>${excerpt.note ? `<p>${escapeHtml(excerpt.note)}</p>` : ''}</article>`; }
 function netdiskResultHtml(item) { return `<article class="netdisk-card"><div><span class="label">${escapeHtml(netdiskSourceName(item.source) || 'NETDISK')}</span><h3><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></h3>${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}<div class="netdisk-meta">${[item.size, item.time, host(item.url)].filter(Boolean).map((value) => `<span>${escapeHtml(value)}</span>`).join('')}</div></div><a class="open-link" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">打开 →</a></article>`; }
 
 const forms = {
   bookmarks: { title:'添加网站', label:'NEW BOOKMARK', fields:() => `<div class="field"><label>名称</label><input name="title" required placeholder="例如：少数派"></div><div class="field"><label>网址</label><input name="url" type="url" required placeholder="https://"></div><div class="field"><label>收藏夹</label><select name="category" required>${folderOptions()}</select></div><div class="field"><label>备注</label><textarea name="note" placeholder="为什么收藏它？"></textarea></div>` },
-  excerpts: { title:'添加摘录', label:'NEW EXCERPT', fields:(item = {}) => `<div class="field"><label>内容</label><textarea name="content" required maxlength="3000" placeholder="写下让你停顿的那句话…">${escapeHtml(item.content || '')}</textarea></div><div class="form-row"><div class="field"><label>作者 / 歌手</label><input name="author" value="${escapeHtml(item.author || '')}" placeholder="例如：加缪、陈奕迅"></div><div class="field"><label>出处</label><input name="source" value="${escapeHtml(item.source || '')}" placeholder="书名、歌名、电影或其他来源"></div></div><div class="field"><label>摘录日期</label><input name="excerptDate" type="date" value="${escapeHtml(item.excerptDate || dateKey())}"></div><div class="field"><label>备注（可选）</label><textarea name="note" maxlength="500" placeholder="当时的想法、页码或场景…">${escapeHtml(item.note || '')}</textarea></div>` },
+  excerpts: { title:'添加摘录', label:'NEW EXCERPT', fields:(item = {}) => `<div class="field"><label>内容</label><textarea name="content" required maxlength="3000" placeholder="写下让你停顿的那句话…">${escapeHtml(item.content || '')}</textarea></div><div class="form-row"><div class="field"><label>作者 / 歌手</label><input name="author" value="${escapeHtml(item.author || '')}" placeholder="例如：加缪、陈奕迅"></div><div class="field"><label>出处</label><input name="source" value="${escapeHtml(item.source || '')}" placeholder="书名、歌名、电影或其他来源"></div></div><div class="field"><label>摘录日期</label><input name="excerptDate" type="date" value="${escapeHtml(item.excerptDate || dateKey())}"></div><div class="field"><label>备注（可选）</label><textarea name="note" maxlength="500" placeholder="当时的想法、页码或场景…">${escapeHtml(item.note || '')}</textarea></div><div class="field"><label class="checkbox-field"><input name="anonymous" type="checkbox" ${item.isAnonymous ? 'checked' : ''}> 匿名发布</label></div>` },
   folders: { title:'新建收藏夹', label:'NEW COLLECTION', fields:`<div class="field"><label>收藏夹名称</label><input name="name" required maxlength="30" placeholder="例如：旅行灵感"></div>` },
   todos: { title:'添加待办', label:'NEW TO-DO', fields:`<div class="field"><label>待办内容</label><input name="title" required placeholder="我准备完成…"></div><div class="form-row"><div class="field"><label>优先级</label><select name="priority"><option value="medium">普通</option><option value="high">重要</option><option value="low">低</option></select></div><div class="field"><label>截止日期</label><input name="dueDate" type="date"></div></div>` },
   plans: { title:'制定计划', label:'NEW PLAN', fields:() => `<div class="field"><label>计划名称</label><input name="title" required placeholder="例如：晨间阅读"></div><div class="form-row"><div class="field"><label>计划类型</label><select name="frequencyType"><option value="daily">日常计划</option><option value="weekly">周常计划</option><option value="monthly">月度计划</option></select></div><div class="field"><label>每周期目标次数</label><input name="targetCount" type="number" min="1" max="99" value="1" required></div></div><div class="form-row"><div class="field"><label>开始日期</label><input name="startDate" type="date" required value="${state.planDate}"></div><div class="field"><label>结束日期（可选）</label><input name="endDate" type="date"></div></div><div class="form-row"><div class="field"><label>提醒时间</label><input name="time" type="time" required value="09:00"></div><div class="field"><label>每次时长（分钟）</label><input name="duration" type="number" min="5" max="480" value="30"></div></div><div class="field"><label>标记颜色</label><select name="color"><option value="violet">紫色</option><option value="orange">橙色</option><option value="green">绿色</option><option value="blue">蓝色</option></select></div>` }
@@ -1055,6 +1056,20 @@ document.addEventListener('click', async (event) => {
       await loadLibrary();
       await openLibraryReaders(libraryReadDelete.dataset.bookId);
       toast('阅读记录已删除');
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  const libraryReviewToggle = event.target.closest('[data-library-review-toggle]');
+  if (libraryReviewToggle) {
+    try {
+      await request(`/api/library/books/${state.library.reviewBookId}/reviews/${libraryReviewToggle.dataset.libraryReviewToggle}`, {
+        method:'PATCH',
+        body:JSON.stringify({ anonymous: libraryReviewToggle.dataset.libraryReviewAnonymous !== 'true' }),
+      });
+      await openLibraryReviews(state.library.reviewBookId);
+      toast(libraryReviewToggle.dataset.libraryReviewAnonymous === 'true' ? '已取消匿名' : '已设为匿名');
     } catch (error) {
       toast(error.message);
     }
@@ -1216,6 +1231,7 @@ document.addEventListener('click', async (event) => {
 
 $('#item-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const form = event.currentTarget; const type=form.dataset.type; const itemId=form.dataset.id; const payload=Object.fromEntries(new FormData(form));
+  if (type === 'excerpts') payload.anonymous = Boolean(form.elements.anonymous.checked);
   if (payload.duration) payload.duration=Number(payload.duration);
   if (payload.targetCount) payload.targetCount=Number(payload.targetCount);
   const editing = Boolean(itemId);
@@ -1261,7 +1277,7 @@ $('#library-read-form').addEventListener('submit', async (event) => {
   button.disabled = true;
   try {
     const path = readId ? `/api/library/books/${bookId}/reads/${readId}` : `/api/library/books/${bookId}/reads`;
-    await request(path, { method:readId ? 'PATCH' : 'POST', body:JSON.stringify({ readDate, review }) });
+    await request(path, { method:readId ? 'PATCH' : 'POST', body:JSON.stringify({ readDate, review, reviewAnonymous: readId ? false : form.elements.reviewAnonymous.checked }) });
     $('#library-read-modal').hidden = true;
     await loadLibrary();
     if (returnToReaders) await openLibraryReaders(bookId);
@@ -1280,7 +1296,7 @@ $('#library-review-form').addEventListener('submit', async (event) => {
   if (!content) return;
   button.disabled = true;
   try {
-    await request(`/api/library/books/${state.library.reviewBookId}/reviews`, { method:'POST', body:JSON.stringify({ content }) });
+    await request(`/api/library/books/${state.library.reviewBookId}/reviews`, { method:'POST', body:JSON.stringify({ content, anonymous: form.elements.anonymous.checked }) });
     form.reset();
     await openLibraryReviews(state.library.reviewBookId);
     toast('书评已发布');

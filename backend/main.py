@@ -91,6 +91,7 @@ from .repository import (
     soft_delete_hermes_conversation,
     update_hermes_conversation_after_message,
     update_book,
+    update_book_review_anonymity,
     update_book_read,
     update_item,
 )
@@ -144,12 +145,16 @@ def validate(collection: str, input_data: dict[str, Any]) -> dict[str, Any]:
         excerpt_date = str(item.get("excerptDate") or "")
         if excerpt_date and not _is_date(excerpt_date):
             raise HTTPException(status_code=422, detail="请输入有效日期")
+        anonymous = item.get("anonymous", item.get("isAnonymous", False))
+        if not isinstance(anonymous, bool):
+            raise HTTPException(status_code=422, detail="匿名状态必须是布尔值")
         return {
             "content": content,
             "source": str(item.get("source") or "").strip()[:200],
             "author": str(item.get("author") or "").strip()[:100],
             "excerptDate": excerpt_date,
             "note": str(item.get("note") or "").strip()[:500],
+            "anonymous": anonymous,
         }
 
     title = str(item.get("title") or "").strip()
@@ -1227,6 +1232,14 @@ def _library_review(value: Any) -> str:
     return candidate
 
 
+def _library_anonymous(value: Any) -> bool:
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise HTTPException(status_code=422, detail="匿名状态必须是布尔值")
+    return value
+
+
 def _library_book_or_404(book_id: str, user_id: str) -> dict[str, Any]:
     book = get_book(book_id, user_id)
     if not book:
@@ -1461,7 +1474,17 @@ async def library_create_review(book_id: str, request: Request):
     content = _library_review(data.get("content"))
     if not content:
         raise HTTPException(status_code=422, detail="书评内容不能为空")
-    return create_book_review(book_id, user["id"], user["username"], content)
+    return create_book_review(book_id, user["id"], user["username"], content, _library_anonymous(data.get("anonymous")))
+
+
+@app.patch("/api/library/books/{book_id}/reviews/{review_id}")
+async def library_update_review(book_id: str, review_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    _library_book_or_404(book_id, user["id"])
+    data = await request.json()
+    if not update_book_review_anonymity(book_id, review_id, user["id"], _library_anonymous(data.get("anonymous"))):
+        raise HTTPException(status_code=404, detail="书评不存在")
+    return {"ok": True}
 
 
 @app.delete("/api/library/books/{book_id}/reviews/{review_id}")
@@ -1484,6 +1507,7 @@ async def library_create_read(book_id: str, request: Request):
         _library_date(data.get("readDate")),
         _library_review(data.get("review")),
         user["username"],
+        _library_anonymous(data.get("reviewAnonymous")),
     )
 
 

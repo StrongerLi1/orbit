@@ -27,11 +27,18 @@ def main() -> None:
         "excerpt_date": "2026-07-15",
         "note": "",
         "created_at": "2026-07-15T00:00:00Z",
+        "is_anonymous": 1,
     }
-    assert _excerpt_row(row, "u1", False)["canManage"] is True
+    owner_view = _excerpt_row(row, "u1", False)
+    assert owner_view["canManage"] is True
+    assert owner_view["canToggleAnonymous"] is True
+    assert owner_view["createdByName"] == "alice"
+    assert owner_view["isAnonymous"] is True
     assert _excerpt_row(row, "u2", False)["canManage"] is False
+    assert _excerpt_row(row, "u2", False)["createdByName"] == "匿名用户"
+    assert _excerpt_row(row, "", False)["createdByName"] == "匿名用户"
     assert _excerpt_row(row, "u2", True)["canManage"] is True
-    assert _excerpt_row(row, "u2", False)["createdByName"] == "alice"
+    assert _excerpt_row(row, "u2", True)["createdByName"] == "alice"
 
     clean = validate("excerpts", {
         "content": "一句话",
@@ -40,6 +47,8 @@ def main() -> None:
     })
     assert "createdByName" not in clean
     assert "owner_user_id" not in clean
+    assert clean["anonymous"] is False
+    assert validate("excerpts", {"content": "一句话", "anonymous": True})["anonymous"] is True
 
 
 if __name__ == "__main__":

@@ -7,12 +7,19 @@ from .database import connection, now_iso
 
 
 USER_SCOPED_COLLECTIONS = frozenset({"todos", "plans"})
+ANONYMOUS_NAME = "匿名用户"
 
 
 def _required_owner_id(collection: str, current_user_id: str) -> str:
     if collection in USER_SCOPED_COLLECTIONS and not current_user_id:
         raise ValueError(f"{collection} 必须绑定当前用户")
     return current_user_id
+
+
+def _display_name(owner_user_id: str, owner_name: str, current_user_id: str, is_admin: bool, is_anonymous: bool) -> str:
+    if not is_anonymous or is_admin or bool(current_user_id and owner_user_id == current_user_id):
+        return owner_name
+    return ANONYMOUS_NAME
 
 
 def _plan_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -36,6 +43,7 @@ def _plan_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def _excerpt_row(row: dict[str, Any], current_user_id: str = "", is_admin: bool = False) -> dict[str, Any]:
     owner_user_id = row.get("owner_user_id") or ""
+    is_anonymous = bool(row.get("is_anonymous"))
     return {
         "id": row["id"],
         "content": row["content"],
@@ -44,7 +52,9 @@ def _excerpt_row(row: dict[str, Any], current_user_id: str = "", is_admin: bool 
         "excerptDate": row["excerpt_date"],
         "note": row["note"],
         "createdAt": row["created_at"],
-        "createdByName": row.get("owner_name") or "admin",
+        "createdByName": _display_name(owner_user_id, row.get("owner_name") or "admin", current_user_id, is_admin, is_anonymous),
+        "isAnonymous": is_anonymous,
+        "canToggleAnonymous": bool(current_user_id and owner_user_id == current_user_id),
         "canManage": is_admin or bool(current_user_id and owner_user_id == current_user_id),
     }
 
@@ -123,8 +133,8 @@ def create_item(collection: str, item: dict[str, Any], current_user: dict[str, A
                 if not current_user:
                     raise ValueError("摘录必须绑定当前用户")
                 cursor.execute(
-                    "INSERT INTO excerpts (id, owner_user_id, owner_name, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (item_id, current_user["id"], current_user["username"], item["content"], item["source"], item["author"], item["excerptDate"], item["note"], created_at),
+                    "INSERT INTO excerpts (id, owner_user_id, owner_name, is_anonymous, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (item_id, current_user["id"], current_user["username"], 1 if item["anonymous"] else 0, item["content"], item["source"], item["author"], item["excerptDate"], item["note"], created_at),
                 )
     if current_user:
         return get_item(collection, item_id, current_user_id, "users:manage" in current_user.get("permissions", []))
@@ -148,7 +158,7 @@ def update_item(collection: str, item_id: str, item: dict[str, Any], current_use
             elif collection == "plans":
                 cursor.execute("UPDATE plans SET title = %s, frequency_type = %s, target_count = %s, start_date = %s, end_date = %s, completions = %s, time = %s, duration = %s, color = %s WHERE id = %s AND owner_user_id = %s", (item["title"], item["frequencyType"], item["targetCount"], item["startDate"], item["endDate"], json.dumps(item["completions"], ensure_ascii=False), item["time"], item["duration"], item["color"], item_id, owner_user_id))
             elif collection == "excerpts":
-                cursor.execute("UPDATE excerpts SET content = %s, source = %s, author = %s, excerpt_date = %s, note = %s WHERE id = %s", (item["content"], item["source"], item["author"], item["excerptDate"], item["note"], item_id))
+                cursor.execute("UPDATE excerpts SET is_anonymous = %s, content = %s, source = %s, author = %s, excerpt_date = %s, note = %s WHERE id = %s", (1 if item["anonymous"] else 0, item["content"], item["source"], item["author"], item["excerptDate"], item["note"], item_id))
     return get_item(collection, item_id, current_user_id, is_admin)
 
 
@@ -396,12 +406,15 @@ def _book_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def _book_review_row(row: dict[str, Any], current_user_id: str = "", is_admin: bool = False) -> dict[str, Any]:
     owner_user_id = row["user_id"]
+    is_anonymous = bool(row.get("is_anonymous"))
     return {
         "id": row["id"],
-        "username": row["reviewer_name"],
+        "username": _display_name(owner_user_id, row["reviewer_name"], current_user_id, is_admin, is_anonymous),
         "content": row["content"],
         "createdAt": row["created_at"],
+        "isAnonymous": is_anonymous,
         "canDelete": is_admin or owner_user_id == current_user_id,
+        "canToggleAnonymous": owner_user_id == current_user_id,
     }
 
 
@@ -565,7 +578,7 @@ def list_book_reviews(book_id: str, current_user_id: str, is_admin: bool = False
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT id, book_id, user_id, reviewer_name, content, created_at
+                SELECT id, book_id, user_id, reviewer_name, is_anonymous, content, created_at
                 FROM book_reviews
                 WHERE book_id = %s
                 ORDER BY created_at DESC
@@ -583,28 +596,31 @@ def _insert_book_review(
     reviewer_name: str,
     content: str,
     created_at: str,
+    is_anonymous: bool = False,
 ) -> None:
     cursor.execute(
         """
-        INSERT INTO book_reviews (id, book_id, user_id, reviewer_name, content, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO book_reviews (id, book_id, user_id, reviewer_name, is_anonymous, content, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """,
-        (review_id, book_id, user_id, reviewer_name, content, created_at),
+        (review_id, book_id, user_id, reviewer_name, 1 if is_anonymous else 0, content, created_at),
     )
 
 
-def create_book_review(book_id: str, user_id: str, reviewer_name: str, content: str) -> dict[str, Any]:
+def create_book_review(book_id: str, user_id: str, reviewer_name: str, content: str, is_anonymous: bool = False) -> dict[str, Any]:
     review_id = str(uuid.uuid4())
     created_at = now_iso()
     with connection() as conn:
         with conn.cursor() as cursor:
-            _insert_book_review(cursor, review_id, book_id, user_id, reviewer_name, content, created_at)
+            _insert_book_review(cursor, review_id, book_id, user_id, reviewer_name, content, created_at, is_anonymous)
     return {
         "id": review_id,
         "username": reviewer_name,
         "content": content,
         "createdAt": created_at,
+        "isAnonymous": bool(is_anonymous),
         "canDelete": True,
+        "canToggleAnonymous": True,
     }
 
 
@@ -620,12 +636,23 @@ def delete_book_review(book_id: str, review_id: str, user_id: str, is_admin: boo
             return cursor.rowcount > 0
 
 
+def update_book_review_anonymity(book_id: str, review_id: str, user_id: str, is_anonymous: bool) -> bool:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "UPDATE book_reviews SET is_anonymous = %s WHERE id = %s AND book_id = %s AND user_id = %s",
+                (1 if is_anonymous else 0, review_id, book_id, user_id),
+            )
+            return cursor.rowcount > 0
+
+
 def create_book_read(
     book_id: str,
     user_id: str,
     read_date: str,
     review_content: str = "",
     reviewer_name: str = "",
+    review_anonymous: bool = False,
 ) -> dict[str, Any]:
     read_id = str(uuid.uuid4())
     created_at = now_iso()
@@ -643,13 +670,15 @@ def create_book_read(
                 )
                 if review_content:
                     review_id = str(uuid.uuid4())
-                    _insert_book_review(cursor, review_id, book_id, user_id, reviewer_name, review_content, created_at)
+                    _insert_book_review(cursor, review_id, book_id, user_id, reviewer_name, review_content, created_at, review_anonymous)
                     review = {
                         "id": review_id,
                         "username": reviewer_name,
                         "content": review_content,
                         "createdAt": created_at,
+                        "isAnonymous": bool(review_anonymous),
                         "canDelete": True,
+                        "canToggleAnonymous": True,
                     }
                 conn.commit()
             except Exception:

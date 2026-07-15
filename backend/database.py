@@ -174,6 +174,7 @@ def initialize_database() -> None:
                     id VARCHAR(64) PRIMARY KEY,
                     owner_user_id VARCHAR(64) NULL DEFAULT NULL,
                     owner_name VARCHAR(64) NOT NULL DEFAULT 'admin',
+                    is_anonymous TINYINT(1) NOT NULL DEFAULT 0,
                     content TEXT NOT NULL,
                     source VARCHAR(300) NOT NULL,
                     author VARCHAR(160) NOT NULL,
@@ -186,6 +187,7 @@ def initialize_database() -> None:
             for column, definition in {
                 "owner_user_id": "VARCHAR(64) NULL DEFAULT NULL AFTER id",
                 "owner_name": "VARCHAR(64) NOT NULL DEFAULT 'admin' AFTER owner_user_id",
+                "is_anonymous": "TINYINT(1) NOT NULL DEFAULT 0 AFTER owner_name",
             }.items():
                 cursor.execute(
                     """
@@ -238,6 +240,7 @@ def initialize_database() -> None:
                     book_id VARCHAR(64) NOT NULL,
                     user_id VARCHAR(64) NOT NULL,
                     reviewer_name VARCHAR(64) NOT NULL,
+                    is_anonymous TINYINT(1) NOT NULL DEFAULT 0,
                     content TEXT NOT NULL,
                     created_at VARCHAR(40) NOT NULL,
                     INDEX idx_book_reviews_book_created (book_id, created_at),
@@ -245,6 +248,16 @@ def initialize_database() -> None:
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'book_reviews' AND COLUMN_NAME = 'is_anonymous'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE book_reviews ADD COLUMN is_anonymous TINYINT(1) NOT NULL DEFAULT 0 AFTER reviewer_name")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS hermes_conversations (
@@ -458,6 +471,6 @@ def replace_all(data: dict[str, list[dict[str, Any]]]) -> None:
                 )
             for excerpt in reversed(data["excerpts"]):
                 cursor.execute(
-                    "INSERT INTO excerpts (id, owner_user_id, owner_name, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                    (excerpt.get("id") or str(uuid.uuid4()), None, "admin", excerpt.get("content", ""), excerpt.get("source", ""), excerpt.get("author", ""), excerpt.get("excerptDate", ""), excerpt.get("note", ""), excerpt.get("createdAt") or now_iso()),
+                    "INSERT INTO excerpts (id, owner_user_id, owner_name, is_anonymous, content, source, author, excerpt_date, note, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (excerpt.get("id") or str(uuid.uuid4()), None, "admin", 1 if excerpt.get("isAnonymous") else 0, excerpt.get("content", ""), excerpt.get("source", ""), excerpt.get("author", ""), excerpt.get("excerptDate", ""), excerpt.get("note", ""), excerpt.get("createdAt") or now_iso()),
                 )

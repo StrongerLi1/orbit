@@ -466,7 +466,7 @@ def test_read_grouping() -> None:
 
 def test_review_mapping_and_permissions() -> None:
     rows = [
-        {"id": "v1", "book_id": "b1", "user_id": "u1", "reviewer_name": "alice", "content": "我的评论", "created_at": "2026-07-15T00:00:00Z"},
+        {"id": "v1", "book_id": "b1", "user_id": "u1", "reviewer_name": "alice", "is_anonymous": 1, "content": "我的评论", "created_at": "2026-07-15T00:00:00Z"},
         {"id": "v2", "book_id": "b1", "user_id": "u2", "reviewer_name": "bob", "content": "另一条评论", "created_at": "2026-07-14T00:00:00Z"},
     ]
 
@@ -488,9 +488,15 @@ def test_review_mapping_and_permissions() -> None:
     try:
         result = repository_module.list_book_reviews("b1", "u1")
         assert result[0]["canDelete"] is True
+        assert result[0]["canToggleAnonymous"] is True
+        assert result[0]["username"] == "alice"
         assert result[1]["canDelete"] is False
+        assert result[1]["username"] == "bob"
+        other_result = repository_module.list_book_reviews("b1", "u2")
+        assert other_result[0]["username"] == "匿名用户"
         admin_result = repository_module.list_book_reviews("b1", "admin", True)
         assert all(review["canDelete"] for review in admin_result)
+        assert admin_result[0]["username"] == "alice"
     finally:
         repository_module.connection = original
 
@@ -503,17 +509,19 @@ def test_read_routes() -> None:
     original_delete = main_module.delete_book_read
     original_create_review = main_module.create_book_review
     original_delete_review = main_module.delete_book_review
+    original_update_review = main_module.update_book_review_anonymity
     original_list_reviews = main_module.list_book_reviews
     calls = []
     try:
         main_module.require_permission = lambda _request, permission: calls.append(permission) or {"id": "u1", "username": "alice", "permissions": []}
         main_module._library_book_or_404 = lambda book_id, user_id: {"id": book_id, "user": user_id}
-        main_module.create_book_read = lambda book_id, user_id, read_date, review_content="", reviewer_name="": {"id": "r1", "book": book_id, "user": user_id, "readDate": read_date, "review": review_content}
+        main_module.create_book_read = lambda book_id, user_id, read_date, review_content="", reviewer_name="", review_anonymous=False: {"id": "r1", "book": book_id, "user": user_id, "readDate": read_date, "review": review_content, "reviewAnonymous": review_anonymous}
         created = asyncio.run(main_module.library_create_read("b1", FakeRequest({"readDate": "2026-07-14"})))
         assert created["readDate"] == "2026-07-14"
         assert calls == ["library:read"]
-        created_with_review = asyncio.run(main_module.library_create_read("b1", FakeRequest({"readDate": "2026-07-15", "review": "  很好看  "})))
+        created_with_review = asyncio.run(main_module.library_create_read("b1", FakeRequest({"readDate": "2026-07-15", "review": "  很好看  ", "reviewAnonymous": True})))
         assert created_with_review["review"] == "很好看"
+        assert created_with_review["reviewAnonymous"] is True
 
         try:
             asyncio.run(main_module.library_create_read("b1", FakeRequest({"readDate": "2026-02-30"})))
@@ -532,18 +540,24 @@ def test_read_routes() -> None:
         main_module.delete_book_read = lambda *_args: False
         assert_http(404, lambda: main_module.library_delete_read("b1", "other-user-record", FakeRequest()))
 
-        main_module.create_book_review = lambda book_id, user_id, reviewer_name, content: {"id": "v1", "book": book_id, "user": user_id, "username": reviewer_name, "content": content}
+        main_module.create_book_review = lambda book_id, user_id, reviewer_name, content, is_anonymous=False: {"id": "v1", "book": book_id, "user": user_id, "username": reviewer_name, "content": content, "isAnonymous": is_anonymous}
         main_module.list_book_reviews = lambda book_id, user_id, is_admin: [{"id": "v1", "canDelete": is_admin or user_id == "u1"}]
         listed_reviews = main_module.library_book_reviews("b1", FakeRequest())
         assert listed_reviews == [{"id": "v1", "canDelete": True}]
-        created_review = asyncio.run(main_module.library_create_review("b1", FakeRequest({"content": "  很值得重读  "})))
+        created_review = asyncio.run(main_module.library_create_review("b1", FakeRequest({"content": "  很值得重读  ", "anonymous": True})))
         assert created_review["content"] == "很值得重读"
+        assert created_review["isAnonymous"] is True
         assert calls[-1] == "library:read"
         assert_http(422, lambda: asyncio.run(main_module.library_create_review("b1", FakeRequest({"content": "   "}))))
         assert_http(422, lambda: asyncio.run(main_module.library_create_review("b1", FakeRequest({"content": "x" * 3001}))))
 
         main_module.delete_book_review = lambda *_args: False
         assert_http(404, lambda: main_module.library_delete_review("b1", "other-user-review", FakeRequest()))
+        main_module.update_book_review_anonymity = lambda *_args: False
+        assert_http(404, lambda: asyncio.run(main_module.library_update_review("b1", "other-user-review", FakeRequest({"anonymous": True}))))
+        main_module.update_book_review_anonymity = lambda *_args: True
+        assert main_module.library_update_review is not None
+        assert asyncio.run(main_module.library_update_review("b1", "v1", FakeRequest({"anonymous": False}))) == {"ok": True}
         main_module.delete_book_review = lambda *_args: True
         assert main_module.library_delete_review("b1", "v1", FakeRequest()) == {"ok": True}
         admin_calls = []
@@ -558,6 +572,7 @@ def test_read_routes() -> None:
         main_module.delete_book_read = original_delete
         main_module.create_book_review = original_create_review
         main_module.delete_book_review = original_delete_review
+        main_module.update_book_review_anonymity = original_update_review
         main_module.list_book_reviews = original_list_reviews
 
 
