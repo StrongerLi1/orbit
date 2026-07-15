@@ -858,3 +858,38 @@ Built and verified the native Android Orbit client, switched the default backend
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 按用户隔离待办和计划
+
+**Date**: 2026-07-15
+**Task**: 按用户隔离待办和计划
+**Branch**: `main`
+
+### Summary
+
+待办和计划已按认证用户 UID 严格隔离；历史无主数据归属管理员；跨用户读写返回 404；生产部署和真实 API 冒烟通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31978e8` | (see git log) |
+| `e1dcdeb` | (see git log) |
+| `5e2ee3d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

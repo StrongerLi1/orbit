@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~860 | Active |
+| `journal-1.md` | ~895 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-07-15 | 按用户隔离待办和计划 | `31978e8`, `e1dcdeb`, `5e2ee3d` | `main` |
 | 13 | 2026-07-15 | Native Android client with HTTPS domain | `c1455fd`, `2c46ff5` | `main` |
 | 12 | 2026-07-15 | PDF first-page covers | `7559a12` | `main` |
 | 11 | 2026-07-14 | 收口 HTTPS 并推送 Android | `c1455fd`, `337b19a` | `main` |
