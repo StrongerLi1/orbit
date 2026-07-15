@@ -791,3 +791,70 @@ Integrated LX Music behind Orbit SSO, migrated the gateway to the HTTPS domain, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: PDF first-page covers
+
+**Date**: 2026-07-15
+**Task**: PDF first-page covers
+**Branch**: `main`
+
+### Summary
+
+Added bounded PDF first-page JPEG cover generation, deployed and validated it in production, and archived the shared-library metadata task.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7559a12` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 13: Native Android client with HTTPS domain
+
+**Date**: 2026-07-15
+**Task**: Native Android client with HTTPS domain
+**Branch**: `main`
+
+### Summary
+
+Built and verified the native Android Orbit client, switched the default backend to https://shawnstronger.cloud, isolated content-load failures, migrated cookies safely across origins, produced the debug APK, and documented the client contracts.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c1455fd` | (see git log) |
+| `2c46ff5` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
-- **Last Active**: 2026-07-14
+- **Total Sessions**: 13
+- **Last Active**: 2026-07-15
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~793 | Active |
+| `journal-1.md` | ~860 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-07-15 | Native Android client with HTTPS domain | `c1455fd`, `2c46ff5` | `main` |
+| 12 | 2026-07-15 | PDF first-page covers | `7559a12` | `main` |
 | 11 | 2026-07-14 | 收口 HTTPS 并推送 Android | `c1455fd`, `337b19a` | `main` |
 | 10 | 2026-07-14 | Integrate and deploy LX Music | `3d83d35` | `main` |
 | 9 | 2026-07-14 | Shared ebook library | `96644ae` | `main` |
