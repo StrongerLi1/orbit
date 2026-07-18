@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css?v=20260715-anonymous-content">
+  <link rel="stylesheet" href="/writings.css?v=20260719-writing-posts">
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -43,6 +44,7 @@
         <a class="nav-link" href="#netdisk" data-page="netdisk"><span>⌕</span>网盘搜索</a>
         <a class="nav-link" id="lx-music-nav" href="#" hidden><span>♫</span>音乐</a>
         <a class="nav-link" href="#excerpts" data-page="excerpts"><span>“</span>摘录</a>
+        <a class="nav-link" href="#writings" data-page="writings"><span>✎</span>写点什么</a>
         <a class="nav-link" href="#plans" data-page="plans"><span>◷</span>日常计划</a>
         <a class="nav-link" href="#todos" data-page="todos"><span>✓</span>待办事项</a>
         <a class="nav-link" href="#hermes-chat" data-page="hermes-chat" id="hermes-chat-nav" hidden><span>☤</span>Hermes 聊天</a>
@@ -97,6 +99,11 @@
           <div class="page-title"><div><p class="eyebrow">WORDS TO KEEP</p><h1>摘录</h1><p>收藏书中的句子、喜欢的歌词，以及偶然遇见的话。</p></div><button class="primary" data-add="excerpts">＋ 添加摘录</button></div>
           <div class="excerpt-summary"><span id="excerpt-count">0 条摘录</span><button class="text-btn" id="shuffle-excerpt">↻ 换一句</button></div>
           <div id="excerpts-grid" class="excerpts-grid"></div>
+        </section>
+
+        <section class="page" id="writings">
+          <div class="page-title"><div><p class="eyebrow">A PLACE TO WRITE</p><h1>写点什么</h1><p>记下今天的心情、念头，或想留给自己的话。</p></div><button class="primary" data-add="writings">＋ 写点什么</button></div>
+          <div id="writings-grid" class="writings-grid"></div>
         </section>
 
         <section class="page" id="bookmarks">

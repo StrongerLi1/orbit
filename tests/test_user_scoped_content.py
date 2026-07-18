@@ -124,6 +124,7 @@ def main() -> None:
         deleted_tables = [call[0].split()[2] for call in cursor.calls]
         assert "todos" in deleted_tables
         assert "plans" in deleted_tables
+        assert "writing_posts" in deleted_tables
         assert deleted_tables[-1] == "users"
         assert all(params == ("user-a",) for _, params in cursor.calls)
     finally:

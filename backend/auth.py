@@ -226,6 +226,7 @@ def delete_user_account(user_id: str) -> dict[str, bool]:
             cursor.execute("DELETE FROM book_reviews WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM todos WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM plans WHERE owner_user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM writing_posts WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
     return {"ok": True}

@@ -201,6 +201,22 @@ def initialize_database() -> None:
                     cursor.execute(f"ALTER TABLE excerpts ADD COLUMN {column} {definition}")
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS writing_posts (
+                    id VARCHAR(64) PRIMARY KEY,
+                    owner_user_id VARCHAR(64) NOT NULL,
+                    owner_name VARCHAR(64) NOT NULL,
+                    visibility VARCHAR(10) NOT NULL,
+                    is_anonymous TINYINT(1) NOT NULL DEFAULT 0,
+                    content TEXT NOT NULL,
+                    created_at VARCHAR(40) NOT NULL,
+                    updated_at VARCHAR(40) NOT NULL,
+                    INDEX idx_writing_posts_owner_updated (owner_user_id, updated_at),
+                    INDEX idx_writing_posts_visibility_updated (visibility, updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS books (
                     id VARCHAR(64) PRIMARY KEY,
                     title VARCHAR(300) NOT NULL,

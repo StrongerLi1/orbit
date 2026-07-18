@@ -61,7 +61,7 @@ npm start
 
 登录态使用双 JWT：短期 access token 放 HttpOnly Cookie，长期 refresh token 放 HttpOnly Cookie，并在 Redis 中保存 refresh token 的 jti，用于续期和退出登录时失效。
 
-用户权限使用固定 RBAC 角色：`admin` 拥有全部权限，`user` 可以使用业务功能、网盘搜索和 Hermes 聊天。当前版本保留公开注册，新用户默认获得 `user` 角色；收藏和收藏夹仍是共享数据，待办、计划和 Hermes 聊天会话按用户隔离，摘录对所有用户可读但只有摘录人本人或管理员可以编辑、删除。
+用户权限使用固定 RBAC 角色：`admin` 拥有全部权限，`user` 可以使用业务功能、网盘搜索和 Hermes 聊天。当前版本保留公开注册，新用户默认获得 `user` 角色；收藏和收藏夹仍是共享数据，待办、计划和 Hermes 聊天会话按用户隔离，摘录对所有用户可读但只有摘录人本人或管理员可以编辑、删除。Web 端的“写点什么”支持纯文本日记或短句，每篇可选仅自己可见/公开及实名/匿名；私密内容仅作者可读，管理员也不能在产品内访问。
 
 登录系统的完整设计和开发说明见 [`docs/auth-system.md`](docs/auth-system.md)。RBAC 的设计原理和授权逻辑见 [`docs/rbac-design.md`](docs/rbac-design.md)。
 
@@ -80,6 +80,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/todos`，`PATCH/DELETE /api/todos/:id`
 - `GET/POST /api/folders`，`PATCH/DELETE /api/folders/:id`
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
+- `GET/POST /api/writings`，`PATCH/DELETE /api/writings/:id`，Web 写作内容；返回公开内容和当前用户自己的私密内容
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
 - `GET /api/integrations`，返回当前登录用户可见的外部服务入口
 - `GET /api/library/books?q=关键词`，按书名或作者搜索共享图书目录；`POST /api/library/books` 上传电子书

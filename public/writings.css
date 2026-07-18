@@ -1,0 +1,92 @@
+.writings-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.writing-card {
+  display: grid;
+  gap: 16px;
+  min-height: 180px;
+  padding: 22px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.writing-card.is-private {
+  background: #fbfaf7;
+  border-style: dashed;
+}
+
+.writing-head,
+.writing-head > div,
+.writing-actions {
+  display: flex;
+  align-items: center;
+}
+
+.writing-head {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.writing-head > div {
+  min-width: 0;
+  gap: 8px;
+}
+
+.writing-head strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writing-visibility {
+  padding: 4px 7px;
+  color: #746bc2;
+  background: #eeecf8;
+  border-radius: 10px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.is-private .writing-visibility {
+  color: #857254;
+  background: #f3ecdc;
+}
+
+.writing-actions {
+  gap: 8px;
+}
+
+.writing-card p {
+  margin: 0;
+  font-family: Georgia, "Noto Sans SC", serif;
+  font-size: 15px;
+  line-height: 1.8;
+  white-space: pre-line;
+}
+
+.writing-card time {
+  margin-top: auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.writing-card:hover .delete {
+  opacity: 1;
+}
+
+@media (max-width: 900px) {
+  .writings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .writings-grid {
+    grid-template-columns: 1fr;
+  }
+}

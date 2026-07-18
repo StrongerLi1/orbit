@@ -186,6 +186,91 @@ def excerpt_owner_id(item_id: str) -> str | None:
             return row["owner_user_id"] if row else None
 
 
+def _writing_post_row(row: dict[str, Any], current_user_id: str) -> dict[str, Any]:
+    owner_user_id = row["owner_user_id"]
+    is_own = owner_user_id == current_user_id
+    is_anonymous = bool(row["is_anonymous"])
+    return {
+        "id": row["id"],
+        "content": row["content"],
+        "visibility": row["visibility"],
+        "isAnonymous": is_anonymous,
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "createdByName": row["owner_name"] if is_own or not is_anonymous else ANONYMOUS_NAME,
+        "isOwn": is_own,
+        "canManage": is_own,
+    }
+
+
+def list_writing_posts(current_user_id: str) -> list[dict[str, Any]]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT * FROM writing_posts
+                WHERE visibility = 'public' OR owner_user_id = %s
+                ORDER BY updated_at DESC
+                """,
+                (current_user_id,),
+            )
+            return [_writing_post_row(row, current_user_id) for row in cursor.fetchall()]
+
+
+def get_writing_post_for_owner(post_id: str, current_user_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM writing_posts WHERE id = %s AND owner_user_id = %s",
+                (post_id, current_user_id),
+            )
+            row = cursor.fetchone()
+            return _writing_post_row(row, current_user_id) if row else None
+
+
+def create_writing_post(item: dict[str, Any], current_user: dict[str, Any]) -> dict[str, Any]:
+    post_id = str(uuid.uuid4())
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO writing_posts
+                    (id, owner_user_id, owner_name, visibility, is_anonymous, content, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (post_id, current_user["id"], current_user["username"], item["visibility"], 1 if item["anonymous"] else 0, item["content"], created_at, created_at),
+            )
+    created = get_writing_post_for_owner(post_id, current_user["id"])
+    if created is None:
+        raise RuntimeError("写作内容创建失败")
+    return created
+
+
+def update_writing_post(post_id: str, item: dict[str, Any], current_user_id: str) -> dict[str, Any] | None:
+    updated_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE writing_posts
+                SET content = %s, visibility = %s, is_anonymous = %s, updated_at = %s
+                WHERE id = %s AND owner_user_id = %s
+                """,
+                (item["content"], item["visibility"], 1 if item["anonymous"] else 0, updated_at, post_id, current_user_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+    return get_writing_post_for_owner(post_id, current_user_id)
+
+
+def delete_writing_post(post_id: str, current_user_id: str) -> bool:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM writing_posts WHERE id = %s AND owner_user_id = %s", (post_id, current_user_id))
+            return cursor.rowcount > 0
+
+
 def folder_exists(name: str) -> bool:
     with connection() as conn:
         with conn.cursor() as cursor:

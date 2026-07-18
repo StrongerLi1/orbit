@@ -67,10 +67,12 @@ from .repository import (
     create_book_review,
     create_book_read,
     create_item,
+    create_writing_post,
     delete_book,
     delete_book_review,
     delete_book_read,
     delete_item,
+    delete_writing_post,
     folder_exists,
     folder_has_bookmarks,
     add_hermes_message,
@@ -80,6 +82,7 @@ from .repository import (
     get_book,
     get_book_storage,
     get_item,
+    get_writing_post_for_owner,
     list_admin_hermes_conversations,
     list_book_reviews,
     list_hermes_conversations,
@@ -87,6 +90,7 @@ from .repository import (
     list_book_reads,
     list_books,
     list_items,
+    list_writing_posts,
     hermes_chat_user_lock,
     soft_delete_hermes_conversation,
     update_hermes_conversation_after_message,
@@ -94,6 +98,7 @@ from .repository import (
     update_book_review_anonymity,
     update_book_read,
     update_item,
+    update_writing_post,
 )
 
 
@@ -156,6 +161,18 @@ def validate(collection: str, input_data: dict[str, Any]) -> dict[str, Any]:
             "note": str(item.get("note") or "").strip()[:500],
             "anonymous": anonymous,
         }
+
+    if collection == "writings":
+        content = str(item.get("content") or "").strip()[:8000]
+        if not content:
+            raise HTTPException(status_code=422, detail="写作内容不能为空")
+        visibility = item.get("visibility")
+        if visibility not in {"private", "public"}:
+            raise HTTPException(status_code=422, detail="可见范围必须为 private 或 public")
+        anonymous = item.get("anonymous", item.get("isAnonymous"))
+        if not isinstance(anonymous, bool):
+            raise HTTPException(status_code=422, detail="匿名状态必须是布尔值")
+        return {"content": content, "visibility": visibility, "anonymous": anonymous}
 
     title = str(item.get("title") or "").strip()
     if not title:
@@ -1528,6 +1545,38 @@ def library_delete_read(book_id: str, read_id: str, request: Request):
     _library_book_or_404(book_id, user["id"])
     if not delete_book_read(book_id, read_id, user["id"]):
         raise HTTPException(status_code=404, detail="阅读记录不存在")
+    return {"ok": True}
+
+
+@app.get("/api/writings")
+def writing_list(request: Request):
+    user = require_permission(request, "content:read")
+    return list_writing_posts(user["id"])
+
+
+@app.post("/api/writings", status_code=201)
+async def writing_create(request: Request):
+    user = require_permission(request, "content:write")
+    return create_writing_post(validate("writings", await request.json()), user)
+
+
+@app.patch("/api/writings/{post_id}")
+async def writing_update(post_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    existing = get_writing_post_for_owner(post_id, user["id"])
+    if not existing:
+        raise HTTPException(status_code=404, detail="写作内容不存在")
+    updated = update_writing_post(post_id, validate("writings", {**existing, **(await request.json())}), user["id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="写作内容不存在")
+    return updated
+
+
+@app.delete("/api/writings/{post_id}")
+def writing_delete(post_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    if not delete_writing_post(post_id, user["id"]):
+        raise HTTPException(status_code=404, detail="写作内容不存在")
     return {"ok": True}
 
 
