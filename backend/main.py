@@ -1248,9 +1248,9 @@ def _library_book_or_404(book_id: str, user_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/library/books")
-def library_books(request: Request):
+def library_books(request: Request, q: str = ""):
     user = require_permission(request, "library:read")
-    return list_books(user["id"])
+    return list_books(user["id"], q)
 
 
 @app.post("/api/library/books", status_code=201)

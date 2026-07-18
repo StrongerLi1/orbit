@@ -82,7 +82,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET /api/netdisk/search?kw=关键词`，代理 PanSou 网盘搜索
 - `GET /api/integrations`，返回当前登录用户可见的外部服务入口
-- `GET/POST /api/library/books`，共享图书目录与电子书上传
+- `GET /api/library/books?q=关键词`，按书名或作者搜索共享图书目录；`POST /api/library/books` 上传电子书
 - `PATCH/DELETE /api/library/books/:id`，管理员编辑或删除共享书籍
 - `GET /api/library/books/:id/download`，认证下载原始电子书
 - `GET/POST /api/library/books/:id/reads`，查看或新增多次阅读记录

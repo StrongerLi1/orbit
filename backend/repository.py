@@ -418,11 +418,19 @@ def _book_review_row(row: dict[str, Any], current_user_id: str = "", is_admin: b
     }
 
 
-def list_books(user_id: str) -> list[dict[str, Any]]:
+def list_books(user_id: str, query: str = "") -> list[dict[str, Any]]:
+    terms = query.split()
+    search_clause = ""
+    params: list[str] = [user_id]
+    if terms:
+        search_clause = "WHERE " + " AND ".join("(b.title LIKE %s OR b.author LIKE %s)" for _ in terms)
+        for term in terms:
+            pattern = f"%{term}%"
+            params.extend((pattern, pattern))
     with connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
-                """
+                f"""
                 SELECT b.*,
                     COALESCE(stats.reader_count, 0) AS reader_count,
                     COALESCE(stats.read_count, 0) AS read_count,
@@ -439,9 +447,10 @@ def list_books(user_id: str) -> list[dict[str, Any]]:
                     WHERE user_id = %s
                     GROUP BY book_id
                 ) mine ON mine.book_id = b.id
+                {search_clause}
                 ORDER BY b.created_at DESC
                 """,
-                (user_id,),
+                params,
             )
             return [_book_row(row) for row in cursor.fetchall()]
 

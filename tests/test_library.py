@@ -501,6 +501,59 @@ def test_review_mapping_and_permissions() -> None:
         repository_module.connection = original
 
 
+def test_book_search() -> None:
+    rows = [{
+        "id": "b1", "title": "百年孤独", "author": "加西亚·马尔克斯",
+        "file_format": "epub", "original_filename": "book.epub", "file_size": 1,
+        "cover_filename": "", "uploaded_by_name": "alice", "created_at": "1",
+        "updated_at": "1", "reader_count": 0, "read_count": 0,
+        "current_user_read_count": 0,
+    }]
+    calls = []
+
+    class Cursor:
+        def __enter__(self): return self
+        def __exit__(self, *_args): pass
+        def execute(self, query, params): calls.append((query, params))
+        def fetchall(self): return rows
+
+    class Connection:
+        def cursor(self): return Cursor()
+
+    @contextmanager
+    def fake_connection():
+        yield Connection()
+
+    original = repository_module.connection
+    repository_module.connection = fake_connection
+    try:
+        result = repository_module.list_books("u1", "  百年   马尔克斯  ")
+        repository_module.list_books("u1")
+    finally:
+        repository_module.connection = original
+
+    assert result[0]["title"] == "百年孤独"
+    assert calls[0][0].count("(b.title LIKE %s OR b.author LIKE %s)") == 2
+    assert calls[0][1] == ["u1", "%百年%", "%百年%", "%马尔克斯%", "%马尔克斯%"]
+    assert "WHERE (b.title LIKE %s OR b.author LIKE %s)" not in calls[1][0]
+    assert calls[1][1] == ["u1"]
+
+
+def test_book_search_route() -> None:
+    original_require = main_module.require_permission
+    original_list = main_module.list_books
+    calls = []
+    try:
+        main_module.require_permission = lambda _request, permission: calls.append(("permission", permission)) or {"id": "u1"}
+        main_module.list_books = lambda user_id, query: calls.append(("search", user_id, query)) or []
+        assert main_module.library_books(FakeRequest(), "百年 马尔克斯") == []
+    finally:
+        main_module.require_permission = original_require
+        main_module.list_books = original_list
+
+    assert calls == [("permission", "library:read"), ("search", "u1", "百年 马尔克斯")]
+
+
 def test_read_routes() -> None:
     original_require = main_module.require_permission
     original_book = main_module._library_book_or_404
@@ -584,6 +637,8 @@ def main() -> None:
         test_storage_and_upload(root)
         test_upload_route_cleanup(root)
     test_read_grouping()
+    test_book_search()
+    test_book_search_route()
     test_read_routes()
 
 

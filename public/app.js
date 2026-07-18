@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
 let authReturnTarget = new URLSearchParams(location.search).get('next') === 'music' ? 'music' : '';
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -281,18 +281,26 @@ function renderLibrary() {
   if (upload) upload.hidden = !canUploadLibrary();
   const books = state.library.books.filter((book) => state.library.filter === 'all' || (state.library.filter === 'read' ? book.currentUserRead : !book.currentUserRead));
   $('#library-count').textContent = `${books.length} / ${state.library.books.length} 本`;
-  grid.innerHTML = state.library.loading ? empty('正在加载图书馆…') : books.map(libraryBookHtml).join('') || empty(state.library.books.length ? '这个分类还没有书' : '图书馆还是空的，上传第一本书吧');
+  grid.innerHTML = state.library.loading ? empty('正在加载图书馆…') : books.map(libraryBookHtml).join('') || empty(state.library.books.length ? '这个分类还没有书' : state.library.search.trim() ? '没有找到匹配的图书' : '图书馆还是空的，上传第一本书吧');
 }
 
 async function loadLibrary() {
   if (!canReadLibrary()) return;
+  const requestId = ++state.library.searchRequest;
+  const query = state.library.search.trim();
+  const params = new URLSearchParams();
+  if (query) params.set('q', query);
+  const queryString = params.toString();
   state.library.loading = true;
   renderLibrary();
   try {
-    state.library.books = await request('/api/library/books');
+    const books = await request(`/api/library/books${queryString ? `?${queryString}` : ''}`);
+    if (requestId === state.library.searchRequest) state.library.books = books;
   } finally {
-    state.library.loading = false;
-    renderLibrary();
+    if (requestId === state.library.searchRequest) {
+      state.library.loading = false;
+      renderLibrary();
+    }
   }
 }
 
@@ -1307,6 +1315,13 @@ $('#library-review-form').addEventListener('submit', async (event) => {
   }
 });
 document.addEventListener('input', (event) => {
+  const librarySearch = event.target.closest('#library-search');
+  if (librarySearch) {
+    state.library.search = librarySearch.value;
+    clearTimeout(state.library.searchTimer);
+    state.library.searchTimer = setTimeout(() => { void loadLibrary(); }, 250);
+    return;
+  }
   const metadataInput = event.target.closest('#library-book-form [name="title"], #library-book-form [name="author"]');
   if (metadataInput && state.library.bookMode === 'upload') metadataInput.dataset.manualValue = 'true';
 });
