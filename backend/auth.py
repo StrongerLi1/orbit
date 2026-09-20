@@ -20,6 +20,8 @@ REFRESH_COOKIE = "orbit_refresh"
 OLD_SESSION_COOKIE = "orbit_session"
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
 PLAYCAPTCHA_TOKEN_SECONDS = 5 * 60
+PUBLIC_SHARE_FAILURE_LIMIT = 10
+PUBLIC_SHARE_FAILURE_WINDOW_SECONDS = 60
 
 PERMISSIONS = {
     "content:read": "读取共享业务数据",
@@ -281,6 +283,29 @@ def _redis() -> redis.Redis:
         decode_responses=True,
         socket_timeout=3,
     )
+
+
+def _public_share_failure_key(request: Request) -> str:
+    host = request.client.host if request.client else "unknown"
+    host_key = hashlib.sha256(host.encode()).hexdigest()[:32]
+    return f"orbit:library-share-fail:{host_key}"
+
+
+def enforce_public_share_failure_limit(request: Request) -> None:
+    attempts = _redis().get(_public_share_failure_key(request))
+    if int(attempts or 0) >= PUBLIC_SHARE_FAILURE_LIMIT:
+        raise HTTPException(status_code=429, detail="尝试次数过多，请稍后再试")
+
+
+def record_public_share_failure(request: Request) -> None:
+    attempts = _redis().eval(
+        "local n=redis.call('INCR',KEYS[1]); if n==1 then redis.call('EXPIRE',KEYS[1],ARGV[1]) end; return n",
+        1,
+        _public_share_failure_key(request),
+        PUBLIC_SHARE_FAILURE_WINDOW_SECONDS,
+    )
+    if int(attempts) > PUBLIC_SHARE_FAILURE_LIMIT:
+        raise HTTPException(status_code=429, detail="尝试次数过多，请稍后再试")
 
 
 def _b64(data: bytes) -> str:

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260715-anonymous-content">
+  <link rel="stylesheet" href="/styles.css?v=20260914-library-share">
   <link rel="stylesheet" href="/writings.css?v=20260719-writing-posts">
 </head>
 <body>
@@ -268,10 +268,18 @@
       </form>
     </div>
   </div>
+  <div class="modal-backdrop" id="library-share-modal" hidden>
+    <div class="modal library-share-modal" role="dialog" aria-modal="true" aria-labelledby="library-share-title">
+      <div class="modal-head"><div><span class="label">PUBLIC DOWNLOAD</span><h2 id="library-share-title">分享电子书</h2></div><button class="close" data-library-close aria-label="关闭">×</button></div>
+      <div class="field"><label for="library-share-link">任何人都可以通过此链接直接下载，无需登录</label><input id="library-share-link" class="library-share-link" readonly aria-describedby="library-share-warning"><small id="library-share-warning">链接使用便于手动输入的 6 位短码；请只发送给你信任的人。</small></div>
+      <div class="library-share-admin" id="library-share-admin" hidden><button type="button" class="secondary" data-library-share-regenerate>重新生成</button><button type="button" class="delete-account" data-library-share-revoke>撤销分享</button></div>
+      <div class="form-actions"><button type="button" class="secondary" data-library-close>关闭</button><button type="button" class="primary" id="library-share-copy" data-library-share-copy disabled>复制链接</button></div>
+    </div>
+  </div>
   <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-library-upload>▤ 上传电子书</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20260715-anonymous-content"></script>
+  <script src="/app.js?v=20260914-library-share"></script>
 </body>
 </html>

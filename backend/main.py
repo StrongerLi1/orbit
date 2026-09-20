@@ -26,6 +26,7 @@ from .auth import (
     clear_auth_cookies,
     create_user,
     delete_user_account,
+    enforce_public_share_failure_limit,
     ensure_user_active,
     get_user_by_username,
     issue_playcaptcha_token,
@@ -33,6 +34,7 @@ from .auth import (
     list_roles,
     list_users,
     public_user,
+    record_public_share_failure,
     require_permission,
     refresh_user,
     require_user,
@@ -80,6 +82,7 @@ from .repository import (
     excerpt_owner_id,
     get_hermes_conversation,
     get_book,
+    get_book_by_share_token,
     get_book_storage,
     get_item,
     get_writing_post_for_owner,
@@ -91,8 +94,11 @@ from .repository import (
     list_books,
     list_items,
     list_writing_posts,
+    ensure_book_share,
     hermes_chat_user_lock,
     soft_delete_hermes_conversation,
+    replace_book_share,
+    revoke_book_share,
     update_hermes_conversation_after_message,
     update_book,
     update_book_review_anonymity,
@@ -1446,6 +1452,10 @@ def library_download_book(book_id: str, request: Request):
     book = get_book_storage(book_id)
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
+    return _library_book_file_response(book)
+
+
+def _library_book_file_response(book: dict[str, Any]) -> FileResponse:
     path = book_path(book["stored_filename"])
     if not path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
@@ -1455,6 +1465,49 @@ def library_download_book(book_id: str, request: Request):
         filename=clean_download_name(book["original_filename"], book["title"], book["file_format"]),
         content_disposition_type="attachment",
     )
+
+
+def _library_share_path(token: str) -> str:
+    return f"/api/library/shares/{token}/download"
+
+
+@app.post("/api/library/books/{book_id}/share")
+def library_share_book(book_id: str, request: Request):
+    require_permission(request, "library:read")
+    token = ensure_book_share(book_id)
+    if not token:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return {"sharePath": _library_share_path(token)}
+
+
+@app.post("/api/library/books/{book_id}/share/regenerate")
+def library_regenerate_book_share(book_id: str, request: Request):
+    require_permission(request, "library:manage")
+    token = replace_book_share(book_id)
+    if not token:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return {"sharePath": _library_share_path(token)}
+
+
+@app.delete("/api/library/books/{book_id}/share")
+def library_revoke_book_share(book_id: str, request: Request):
+    require_permission(request, "library:manage")
+    if not revoke_book_share(book_id):
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return {"ok": True}
+
+
+@app.get("/api/library/shares/{share_token}/download")
+def library_download_shared_book(share_token: str, request: Request):
+    enforce_public_share_failure_limit(request)
+    if not re.fullmatch(r"(?:[A-HJ-KM-NP-Z2-9]{6}|[A-Za-z0-9_-]{43})", share_token):
+        record_public_share_failure(request)
+        raise HTTPException(status_code=404, detail="分享链接无效")
+    book = get_book_by_share_token(share_token)
+    if not book:
+        record_public_share_failure(request)
+        raise HTTPException(status_code=404, detail="分享链接无效")
+    return _library_book_file_response(book)
 
 
 @app.get("/api/library/books/{book_id}/cover")

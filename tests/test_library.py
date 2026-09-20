@@ -1,5 +1,6 @@
 import asyncio
 import io
+import re
 import sys
 import tempfile
 import zipfile
@@ -13,6 +14,7 @@ from PIL import Image
 from pypdf import PdfWriter
 
 import backend.main as main_module
+import backend.auth as auth_module
 import backend.repository as repository_module
 from backend.config import settings
 from backend.library_files import (
@@ -29,8 +31,9 @@ from backend.library_files import (
 
 
 class FakeRequest:
-    def __init__(self, payload=None):
+    def __init__(self, payload=None, client_host="127.0.0.1"):
         self.payload = payload or {}
+        self.client = type("Client", (), {"host": client_host})()
 
     async def json(self):
         return self.payload
@@ -554,6 +557,181 @@ def test_book_search_route() -> None:
     assert calls == [("permission", "library:read"), ("search", "u1", "百年 马尔克斯")]
 
 
+def test_book_share_repository() -> None:
+    books = {"b1": None, "b2": "EXIST2", "b3": "ABC234"}
+    calls = []
+
+    class Cursor:
+        rowcount = 0
+
+        def __enter__(self): return self
+        def __exit__(self, *_args): pass
+
+        def execute(self, query, params):
+            calls.append((query, params))
+            self.rowcount = 0
+            if query.startswith("SELECT share_token"):
+                self.result = {"share_token": books[params[0]]} if params[0] in books else None
+            elif query.startswith("UPDATE books SET share_token = %s"):
+                token, book_id = params
+                if book_id in books:
+                    if token in books.values() and books[book_id] != token:
+                        raise repository_module.IntegrityError(1062, "duplicate")
+                    books[book_id] = token
+                    self.rowcount = 1
+            elif query.startswith("SELECT id"):
+                self.result = {"id": params[0]} if params[0] in books else None
+            elif query.startswith("UPDATE books SET share_token = NULL"):
+                books[params[0]] = None
+                self.rowcount = 1
+            elif "WHERE share_token = %s" in query:
+                token = params[0]
+                self.result = next(({"id": book_id, "share_token": value} for book_id, value in books.items() if value == token), None)
+
+        def fetchone(self): return self.result
+
+    class Connection:
+        def __init__(self): self.commits = 0; self.rollbacks = 0
+        def cursor(self): return Cursor()
+        def begin(self): pass
+        def commit(self): self.commits += 1
+        def rollback(self): self.rollbacks += 1
+
+    conn = Connection()
+
+    @contextmanager
+    def fake_connection():
+        yield conn
+
+    original_connection = repository_module.connection
+    original_token = repository_module._new_book_share_token
+    generated_token = original_token()
+    assert re.fullmatch(r"[A-HJ-KM-NP-Z2-9]{6}", generated_token)
+    tokens = iter(("ABC234", "DEF567", "DEF567", "GHJ234"))
+    repository_module.connection = fake_connection
+    repository_module._new_book_share_token = lambda: next(tokens)
+    try:
+        assert repository_module.ensure_book_share("b1") == "DEF567"
+        assert repository_module.ensure_book_share("b1") == "DEF567"
+        assert repository_module.ensure_book_share("b2") == "EXIST2"
+        assert repository_module.ensure_book_share("missing") is None
+        assert repository_module.replace_book_share("b1") == "GHJ234"
+        assert repository_module.get_book_by_share_token("GHJ234")["id"] == "b1"
+        assert repository_module.revoke_book_share("b1") is True
+        assert repository_module.get_book_by_share_token("GHJ234") is None
+        assert repository_module.revoke_book_share("missing") is False
+    finally:
+        repository_module.connection = original_connection
+        repository_module._new_book_share_token = original_token
+
+    assert any("FOR UPDATE" in query for query, _params in calls)
+    assert conn.commits == 4
+    assert conn.rollbacks == 1
+
+
+def test_public_share_failure_rate_limit() -> None:
+    class FakeRedis:
+        attempts = 0
+
+        def get(self, key):
+            assert key.startswith("orbit:library-share-fail:")
+            return self.attempts or None
+
+        def eval(self, script, keys, key, window):
+            assert "INCR" in script and keys == 1
+            assert key.startswith("orbit:library-share-fail:")
+            assert window == auth_module.PUBLIC_SHARE_FAILURE_WINDOW_SECONDS
+            self.attempts += 1
+            return self.attempts
+
+    fake_redis = FakeRedis()
+    original_redis = auth_module._redis
+    auth_module._redis = lambda: fake_redis
+    try:
+        for _ in range(auth_module.PUBLIC_SHARE_FAILURE_LIMIT):
+            auth_module.enforce_public_share_failure_limit(FakeRequest(client_host="203.0.113.7"))
+            auth_module.record_public_share_failure(FakeRequest(client_host="203.0.113.7"))
+        assert_http(429, lambda: auth_module.enforce_public_share_failure_limit(FakeRequest(client_host="203.0.113.7")))
+    finally:
+        auth_module._redis = original_redis
+
+
+def test_book_share_routes(root: Path) -> None:
+    original_storage = settings.library_storage_dir
+    original_require = main_module.require_permission
+    original_ensure = main_module.ensure_book_share
+    original_replace = main_module.replace_book_share
+    original_revoke = main_module.revoke_book_share
+    original_lookup = main_module.get_book_by_share_token
+    original_enforce = main_module.enforce_public_share_failure_limit
+    original_failure = main_module.record_public_share_failure
+    permissions = []
+    checks = []
+    failures = []
+    first_token = "ABC234"
+    second_token = "DEF567"
+    book = {
+        "title": "测试书",
+        "file_format": "pdf",
+        "original_filename": "测试书.pdf",
+        "stored_filename": "shared.pdf",
+    }
+    try:
+        settings.library_storage_dir = root / "shared-download"
+        ensure_library_storage()
+        book_path("shared.pdf").write_bytes(b"shared-book")
+        main_module.require_permission = lambda _request, permission: permissions.append(permission) or {"id": "u1"}
+        main_module.ensure_book_share = lambda book_id: first_token if book_id == "b1" else None
+        main_module.replace_book_share = lambda book_id: second_token if book_id == "b1" else None
+        main_module.revoke_book_share = lambda book_id: book_id == "b1"
+        main_module.get_book_by_share_token = lambda token: book if token == first_token else None
+        main_module.enforce_public_share_failure_limit = lambda request: checks.append(request.client.host)
+        main_module.record_public_share_failure = lambda request: failures.append(request.client.host)
+
+        assert main_module.library_share_book("b1", FakeRequest()) == {"sharePath": f"/api/library/shares/{first_token}/download"}
+        assert main_module.library_regenerate_book_share("b1", FakeRequest()) == {"sharePath": f"/api/library/shares/{second_token}/download"}
+        assert main_module.library_revoke_book_share("b1", FakeRequest()) == {"ok": True}
+        assert permissions == ["library:read", "library:manage", "library:manage"]
+        assert_http(404, lambda: main_module.library_share_book("missing", FakeRequest()))
+        assert_http(404, lambda: main_module.library_regenerate_book_share("missing", FakeRequest()))
+        assert_http(404, lambda: main_module.library_revoke_book_share("missing", FakeRequest()))
+
+        permissions.clear()
+        request = FakeRequest(client_host="203.0.113.8")
+        response = main_module.library_download_shared_book(first_token, request)
+        assert Path(response.path).read_bytes() == b"shared-book"
+        assert response.media_type == "application/pdf"
+        assert "attachment" in response.headers["content-disposition"]
+        assert permissions == []
+        assert_http(404, lambda: main_module.library_download_shared_book("short", request))
+        assert_http(404, lambda: main_module.library_download_shared_book("IIIIII", request))
+        assert_http(404, lambda: main_module.library_download_shared_book(second_token, request))
+        assert failures == ["203.0.113.8"] * 3
+
+        book_path("shared.pdf").unlink()
+        assert_http(404, lambda: main_module.library_download_shared_book(first_token, request))
+        assert checks == ["203.0.113.8"] * 5
+
+        lookups = []
+
+        def block_share(_request):
+            raise HTTPException(status_code=429, detail="尝试次数过多，请稍后再试")
+
+        main_module.enforce_public_share_failure_limit = block_share
+        main_module.get_book_by_share_token = lambda token: lookups.append(token)
+        assert_http(429, lambda: main_module.library_download_shared_book(first_token, request))
+        assert lookups == []
+    finally:
+        settings.library_storage_dir = original_storage
+        main_module.require_permission = original_require
+        main_module.ensure_book_share = original_ensure
+        main_module.replace_book_share = original_replace
+        main_module.revoke_book_share = original_revoke
+        main_module.get_book_by_share_token = original_lookup
+        main_module.enforce_public_share_failure_limit = original_enforce
+        main_module.record_public_share_failure = original_failure
+
+
 def test_read_routes() -> None:
     original_require = main_module.require_permission
     original_book = main_module._library_book_or_404
@@ -636,9 +814,12 @@ def main() -> None:
         test_metadata_extraction(root)
         test_storage_and_upload(root)
         test_upload_route_cleanup(root)
+        test_book_share_routes(root)
     test_read_grouping()
     test_book_search()
     test_book_search_route()
+    test_book_share_repository()
+    test_public_share_failure_rate_limit()
     test_read_routes()
 
 

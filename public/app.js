@@ -1,6 +1,6 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], writings: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], writings: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', shareBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
 let authReturnTarget = new URLSearchParams(location.search).get('next') === 'music' ? 'music' : '';
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -264,6 +264,7 @@ function libraryBookHtml(book) {
         <button data-library-readers="${escapeHtml(book.id)}">读者</button>
         <button data-library-reviews="${escapeHtml(book.id)}">书评</button>
         <a href="/api/library/books/${escapeHtml(book.id)}/download">下载</a>
+        <button data-library-share="${escapeHtml(book.id)}">分享</button>
         ${manage}
       </div>
     </div>
@@ -414,14 +415,57 @@ async function openLibraryReviews(bookId) {
   }
 }
 
+function setLibrarySharePath(path = '') {
+  const input = $('#library-share-link');
+  input.value = path ? new URL(path, location.origin).href : '';
+  $('#library-share-copy').disabled = !path;
+}
+
+async function openLibraryShare(bookId) {
+  const book = state.library.books.find((item) => item.id === bookId);
+  if (!book) return;
+  state.library.shareBookId = bookId;
+  $('#library-share-title').textContent = `分享《${book.title}》`;
+  $('#library-share-admin').hidden = !canManageLibrary();
+  setLibrarySharePath();
+  $('#library-share-modal').hidden = false;
+  try {
+    const result = await request(`/api/library/books/${bookId}/share`, { method:'POST' });
+    if (state.library.shareBookId !== bookId) return;
+    setLibrarySharePath(result.sharePath);
+    $('#library-share-link').focus();
+    $('#library-share-link').select();
+  } catch (error) {
+    if (state.library.shareBookId === bookId) {
+      closeLibraryModals();
+      toast(error.message);
+    }
+  }
+}
+
+async function copyLibraryShare() {
+  const input = $('#library-share-link');
+  if (!input.value) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+    toast('分享链接已复制');
+  } catch {
+    input.focus();
+    input.select();
+    toast('请手动复制链接');
+  }
+}
+
 function closeLibraryModals() {
   $('#library-book-modal').hidden = true;
   $('#library-read-modal').hidden = true;
   $('#library-readers-modal').hidden = true;
   $('#library-review-modal').hidden = true;
+  $('#library-share-modal').hidden = true;
   state.library.readers = null;
   state.library.reviews = null;
   state.library.reviewBookId = '';
+  state.library.shareBookId = '';
 }
 
 function renderHermes() {
@@ -1003,7 +1047,7 @@ document.addEventListener('click', async (event) => {
   const add = event.target.closest('[data-add]'); if (add) openModal(add.dataset.add);
   if (event.target.closest('#modal .close') || event.target === $('#modal')) closeModal();
   if (event.target.closest('#auth-captcha-modal .close') || event.target === $('#auth-captcha-modal')) closeAuthCaptcha();
-  if (event.target.closest('[data-library-close]') || ['library-book-modal','library-read-modal','library-readers-modal','library-review-modal'].includes(event.target.id)) closeLibraryModals();
+  if (event.target.closest('[data-library-close]') || ['library-book-modal','library-read-modal','library-readers-modal','library-review-modal','library-share-modal'].includes(event.target.id)) closeLibraryModals();
   if (event.target.closest('[data-library-upload]')) {
     if (!canUploadLibrary()) { toast('没有上传权限'); return; }
     $('#quick-menu').hidden = true;
@@ -1029,6 +1073,39 @@ document.addEventListener('click', async (event) => {
   const libraryReviews = event.target.closest('[data-library-reviews]');
   if (libraryReviews) {
     await openLibraryReviews(libraryReviews.dataset.libraryReviews);
+    return;
+  }
+  const libraryShare = event.target.closest('[data-library-share]');
+  if (libraryShare) {
+    await openLibraryShare(libraryShare.dataset.libraryShare);
+    return;
+  }
+  if (event.target.closest('[data-library-share-copy]')) {
+    await copyLibraryShare();
+    return;
+  }
+  if (event.target.closest('[data-library-share-regenerate]')) {
+    if (!canManageLibrary() || !state.library.shareBookId) { toast('没有管理权限'); return; }
+    if (!confirm('重新生成后，旧分享链接会立即失效。确定继续吗？')) return;
+    try {
+      const result = await request(`/api/library/books/${state.library.shareBookId}/share/regenerate`, { method:'POST' });
+      setLibrarySharePath(result.sharePath);
+      toast('已重新生成分享链接');
+    } catch (error) {
+      toast(error.message);
+    }
+    return;
+  }
+  if (event.target.closest('[data-library-share-revoke]')) {
+    if (!canManageLibrary() || !state.library.shareBookId) { toast('没有管理权限'); return; }
+    if (!confirm('撤销后，当前分享链接会立即失效。确定继续吗？')) return;
+    try {
+      await request(`/api/library/books/${state.library.shareBookId}/share`, { method:'DELETE' });
+      closeLibraryModals();
+      toast('分享链接已撤销');
+    } catch (error) {
+      toast(error.message);
+    }
     return;
   }
   const libraryEdit = event.target.closest('[data-library-edit]');

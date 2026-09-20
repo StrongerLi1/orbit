@@ -86,6 +86,9 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET /api/library/books?q=关键词`，按书名或作者搜索共享图书目录；`POST /api/library/books` 上传电子书
 - `PATCH/DELETE /api/library/books/:id`，管理员编辑或删除共享书籍
 - `GET /api/library/books/:id/download`，认证下载原始电子书
+- `POST /api/library/books/:id/share`，按需创建或读取长期有效的 6 位分享短码链接
+- `POST /api/library/books/:id/share/regenerate`、`DELETE /api/library/books/:id/share`，管理员重新生成或撤销分享链接
+- `GET /api/library/shares/:token/download`，持有效分享链接匿名下载原始电子书
 - `GET/POST /api/library/books/:id/reads`，查看或新增多次阅读记录
 - `PATCH/DELETE /api/library/books/:id/reads/:readId`，用户修改或删除自己的阅读记录
 - `GET/POST /api/library/books/:id/reviews`，查看或发布独立书评；已读未读用户均可发布，可选择匿名
@@ -103,7 +106,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 
 ## 共享图书馆
 
-登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF/AZW3 内嵌元数据，最后从文件名回退；EPUB 和 AZW3 可提取 JPEG、PNG 或 WebP 内嵌封面，PDF 默认将完整第一页生成白底 JPEG 封面。所有用户都能记录多次阅读日期、查看读者历史并发布独立书评；摘录和书评都支持匿名展示，作者本人可看到真实用户名和匿名标识，其他普通用户看到“匿名用户”。只有评论作者可以删除和切换自己书评的匿名状态，管理员可以删除全部书评，阅读记录表单也支持可选书评和匿名发布。只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
+登录用户可以上传 EPUB、PDF、MOBI、AZW3 和 UTF-8 TXT，浏览并下载共享书籍。每本书都可按需生成一个长期有效、便于在 Kindle 手动输入的 6 位分享短码链接，持有链接的人无需登录即可直接下载；重复分享返回同一链接，管理员可以撤销或重新生成，旧链接会立即失效。短码排除易混淆字符，匿名下载失败尝试按来源限速；分享链接仍等同于文件访问权限，请只发送给可信对象。上传时优先采用用户手写的书名、作者和封面，其次读取 EPUB/PDF/AZW3 内嵌元数据，最后从文件名回退；EPUB 和 AZW3 可提取 JPEG、PNG 或 WebP 内嵌封面，PDF 默认将完整第一页生成白底 JPEG 封面。所有用户都能记录多次阅读日期、查看读者历史并发布独立书评；摘录和书评都支持匿名展示，作者本人可看到真实用户名和匿名标识，其他普通用户看到“匿名用户”。只有评论作者可以删除和切换自己书评的匿名状态，管理员可以删除全部书评，阅读记录表单也支持可选书评和匿名发布。只有管理员可以编辑或删除共享书籍。电子书和封面保存在 `LIBRARY_STORAGE_DIR`，MySQL 只保存元数据。默认电子书上限为 100 MB，封面上限为 5 MB；Nginx 部署需要将 `client_max_body_size` 设置为大于 100 MB，例如 `110m`。存储目录不要放在 `public/` 下，并确保运行 Orbit 的系统用户拥有读写权限。
 
 ## LX Music
 

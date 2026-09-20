@@ -227,14 +227,36 @@ def initialize_database() -> None:
                     file_size BIGINT NOT NULL,
                     cover_filename VARCHAR(120) NOT NULL DEFAULT '',
                     cover_content_type VARCHAR(80) NOT NULL DEFAULT '',
+                    share_token VARCHAR(64) NULL DEFAULT NULL,
                     uploaded_by VARCHAR(64) NOT NULL,
                     uploaded_by_name VARCHAR(64) NOT NULL,
                     created_at VARCHAR(40) NOT NULL,
                     updated_at VARCHAR(40) NOT NULL,
-                    INDEX idx_books_created (created_at)
+                    INDEX idx_books_created (created_at),
+                    UNIQUE INDEX idx_books_share_token (share_token)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """
             )
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'books' AND COLUMN_NAME = 'share_token'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE books ADD COLUMN share_token VARCHAR(64) NULL DEFAULT NULL AFTER cover_content_type")
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'books' AND INDEX_NAME = 'idx_books_share_token'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE books ADD UNIQUE INDEX idx_books_share_token (share_token)")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS book_reads (

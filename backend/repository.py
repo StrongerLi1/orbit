@@ -1,13 +1,17 @@
 import json
+import secrets
 import uuid
 from contextlib import contextmanager
 from typing import Any
+
+from pymysql.err import IntegrityError
 
 from .database import connection, now_iso
 
 
 USER_SCOPED_COLLECTIONS = frozenset({"todos", "plans"})
 ANONYMOUS_NAME = "匿名用户"
+BOOK_SHARE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 
 def _required_owner_id(collection: str, current_user_id: str) -> str:
@@ -562,6 +566,83 @@ def get_book_storage(book_id: str) -> dict[str, Any] | None:
     with connection() as conn:
         with conn.cursor() as cursor:
             cursor.execute("SELECT * FROM books WHERE id = %s", (book_id,))
+            return cursor.fetchone()
+
+
+def _new_book_share_token() -> str:
+    return "".join(secrets.choice(BOOK_SHARE_ALPHABET) for _ in range(6))
+
+
+def _assign_book_share_token(cursor, book_id: str, previous_token: str | None = None) -> str:
+    for _ in range(5):
+        token = _new_book_share_token()
+        if token == previous_token:
+            continue
+        try:
+            cursor.execute("UPDATE books SET share_token = %s WHERE id = %s", (token, book_id))
+            return token
+        except IntegrityError:
+            continue
+    raise RuntimeError("无法生成唯一分享短码")
+
+
+def ensure_book_share(book_id: str) -> str | None:
+    with connection() as conn:
+        conn.begin()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT share_token FROM books WHERE id = %s FOR UPDATE", (book_id,))
+                book = cursor.fetchone()
+                if not book:
+                    conn.rollback()
+                    return None
+                token = book.get("share_token") or _assign_book_share_token(cursor, book_id)
+            conn.commit()
+            return token
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def replace_book_share(book_id: str) -> str | None:
+    with connection() as conn:
+        conn.begin()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT share_token FROM books WHERE id = %s FOR UPDATE", (book_id,))
+                book = cursor.fetchone()
+                if not book:
+                    conn.rollback()
+                    return None
+                token = _assign_book_share_token(cursor, book_id, book.get("share_token"))
+            conn.commit()
+            return token
+        except Exception:
+            conn.rollback()
+            raise
+
+
+def revoke_book_share(book_id: str) -> bool:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id FROM books WHERE id = %s", (book_id,))
+            if not cursor.fetchone():
+                return False
+            cursor.execute("UPDATE books SET share_token = NULL WHERE id = %s", (book_id,))
+            return True
+
+
+def get_book_by_share_token(token: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT title, file_format, original_filename, stored_filename
+                FROM books
+                WHERE share_token = %s
+                """,
+                (token,),
+            )
             return cursor.fetchone()
 
 
