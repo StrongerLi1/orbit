@@ -14,8 +14,8 @@ android {
         applicationId = "cloud.shawnstronger.orbit"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.2-debug"
+        versionCode = 4
+        versionName = "1.1.0-debug"
         buildConfigField("String", "DEFAULT_SERVER", "\"https://shawnstronger.cloud\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -48,6 +48,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")

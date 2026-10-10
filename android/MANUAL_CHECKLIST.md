@@ -10,6 +10,14 @@ Run this checklist against a disposable account on both API 26 and the current t
 - [ ] A normal user sees content, netdisk, and Hermes chat only. An admin additionally sees access control and Hermes management.
 - [ ] Only an authenticated admin can change/reset the server; switching logs out and the setting survives process recreation.
 
+## Visual system and navigation
+
+- [ ] Light and dark system themes switch without unreadable text, hard-coded white surfaces, or invisible controls.
+- [ ] The bottom navigation exposes Home, Bookmarks, Plans, Todos, and More; secondary pages return to More with both the toolbar and system back actions.
+- [ ] More shows Excerpts, Netdisk, Hermes, account details, and logout; admin-only destinations remain permission-filtered.
+- [ ] Common narrow-phone layouts and 1.3x system font size keep primary actions reachable without horizontal clipping.
+- [ ] Loading, partial-content error, empty, busy, disabled, destructive, banned, interrupted, and generating states use text or icons as well as color.
+
 ## Shared content
 
 - [ ] Dashboard counts, featured excerpt, current plans, open todos, recent bookmarks, and quick destinations match the browser client.
@@ -29,5 +37,5 @@ Run this checklist against a disposable account on both API 26 and the current t
 ## Packaging and regression
 
 - [ ] Install `app/build/outputs/apk/debug/app-debug.apk` on API 26 and target API devices and complete a navigation smoke test.
-- [x] `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass with JDK 21 and Android SDK Platform 36 (15 JVM tests).
+- [x] `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass with JDK 21 and Android SDK Platform 36 (20 JVM tests).
 - [x] Repository-root `npm test` passes; no Android implementation change touched the existing browser/backend contract.
