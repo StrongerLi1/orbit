@@ -1,6 +1,8 @@
 const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], writings: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', shareBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
+const localDateTimeValue = (value = '') => { const date = value ? new Date(value) : new Date(); const offset = date.getTimezoneOffset() * 60_000; return new Date(date.getTime() - offset).toISOString().slice(0, 16); };
+const formatLocalDateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).format(new Date(value)) : '';
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], writings: [], filmRolls: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', shareBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
 let authReturnTarget = new URLSearchParams(location.search).get('next') === 'music' ? 'music' : '';
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -180,8 +182,9 @@ function mountAuthCaptcha() {
 }
 
 async function load() {
-  [state.bookmarks, state.todos, state.plans, state.folders, state.excerpts, state.writings, state.library.books] = await Promise.all([
+  [state.bookmarks, state.todos, state.plans, state.folders, state.excerpts, state.writings, state.filmRolls, state.library.books] = await Promise.all([
     ...['bookmarks','todos','plans','folders','excerpts','writings'].map((type) => request(`/api/${type}`)),
+    request('/api/film-rolls'),
     canReadLibrary() ? request('/api/library/books') : Promise.resolve([]),
   ]);
   if (!state.excerpts.some((excerpt) => excerpt.id === state.featuredExcerptId)) chooseFeaturedExcerpt();
@@ -213,6 +216,7 @@ function render() {
   $('#excerpt-count').textContent = `${state.excerpts.length} 条摘录`;
   $('#excerpts-grid').innerHTML = state.excerpts.slice().sort((a, b) => (b.excerptDate || b.createdAt).localeCompare(a.excerptDate || a.createdAt)).map(excerptHtml).join('') || empty('还没有摘录，先留下第一句话吧');
   $('#writings-grid').innerHTML = state.writings.map(writingHtml).join('') || empty('还没有内容，写下第一段话吧');
+  renderFilmDiary();
 
   if (!canManageFolders()) state.folderManaging = false;
   $('#bookmarks-filters')?.classList.toggle('managing', state.folderManaging);
@@ -1020,25 +1024,46 @@ function todoHtml(t) { return `<div class="todo-item"><button class="check ${t.c
 function bookmarkHtml(b) { return `<article class="bookmark-card"><div class="bookmark-top"><span class="site-icon">${escapeHtml(b.title[0])}</span><div><a href="${escapeHtml(b.url)}" target="_blank" rel="noreferrer"><h3>${escapeHtml(b.title)}</h3></a><span class="domain">${escapeHtml(host(b.url))}</span></div></div><p>${escapeHtml(b.note || '暂无备注')}</p><div class="bookmark-foot"><label class="folder-picker" title="更换收藏夹"><span>▣</span><select data-move-bookmark="${b.id}" aria-label="移动 ${escapeHtml(b.title)}">${folderOptions(b.category)}</select></label><div><button class="favorite ${b.favorite?'on':''}" data-favorite="${b.id}">★</button><button class="delete" data-delete="bookmarks" data-id="${b.id}">×</button></div></div></article>`; }
 function excerptHtml(excerpt) { const attribution = [excerpt.author, excerpt.source].filter(Boolean).join(' · '); const author = `${excerpt.createdByName || 'admin'}${excerpt.isAnonymous && excerpt.canToggleAnonymous ? ' · 匿名' : ''}`; const actions = excerpt.canManage ? `<div class="excerpt-actions"><button class="text-btn" data-edit="excerpts" data-id="${escapeHtml(excerpt.id)}">编辑</button><button class="delete" data-delete="excerpts" data-id="${escapeHtml(excerpt.id)}" aria-label="删除摘录">×</button></div>` : ''; return `<article class="excerpt-card"><span class="excerpt-mark">“</span><blockquote>${escapeHtml(excerpt.content)}</blockquote><div class="excerpt-meta"><div><strong>${escapeHtml(attribution || '未注明出处')}</strong><small>${escapeHtml(excerpt.excerptDate || '未填写日期')} · ${escapeHtml(author)} 摘录</small></div>${actions}</div>${excerpt.note ? `<p>${escapeHtml(excerpt.note)}</p>` : ''}</article>`; }
 function writingHtml(post) { const visibility = post.visibility === 'private' ? '仅自己可见' : '公开'; const byline = `${post.createdByName || '匿名用户'}${post.isOwn && post.isAnonymous ? ' · 匿名' : ''}`; const actions = post.canManage ? `<div class="writing-actions"><button class="text-btn" data-edit="writings" data-id="${escapeHtml(post.id)}">编辑</button><button class="delete" data-delete="writings" data-id="${escapeHtml(post.id)}" aria-label="删除内容">×</button></div>` : ''; return `<article class="writing-card ${post.visibility === 'private' ? 'is-private' : ''}"><div class="writing-head"><div><span class="writing-visibility">${visibility}</span><strong>${escapeHtml(byline)}</strong></div>${actions}</div><p>${escapeHtml(post.content)}</p><time datetime="${escapeHtml(post.updatedAt || post.createdAt)}">${escapeHtml(post.updatedAt || post.createdAt)}</time></article>`; }
+function filmExposureHtml(exposure, rollId) {
+  const settings = [exposure.lens, exposure.aperture, exposure.shutterSpeed].filter(Boolean);
+  return `<article class="film-exposure"><span class="film-frame">${escapeHtml(exposure.frameNumber)}</span><div class="film-exposure-body"><div class="film-exposure-head"><time datetime="${escapeHtml(exposure.takenAt)}">${escapeHtml(formatLocalDateTime(exposure.takenAt))}</time><div class="film-row-actions"><button data-film-exposure-edit="${escapeHtml(exposure.id)}" data-roll-id="${escapeHtml(rollId)}">编辑</button><button class="danger" data-film-exposure-delete="${escapeHtml(exposure.id)}" data-roll-id="${escapeHtml(rollId)}">删除</button></div></div>${exposure.location ? `<strong>⌖ ${escapeHtml(exposure.location)}</strong>` : ''}${exposure.thoughts ? `<p>${escapeHtml(exposure.thoughts)}</p>` : ''}${settings.length ? `<div class="film-settings">${settings.map((value) => `<span>${escapeHtml(value)}</span>`).join('')}</div>` : ''}</div></article>`;
+}
+function filmRollHtml(roll) {
+  const exposures = roll.exposures || [];
+  const statusLabel = roll.status === 'active' ? '拍摄中' : '已拍完';
+  const nextStatus = roll.status === 'active' ? 'finished' : 'active';
+  return `<article class="film-roll-card"><div class="film-roll-head"><div><span class="film-status ${roll.status}">${statusLabel}</span><h3>${escapeHtml(roll.filmStock)}</h3><p>${escapeHtml(roll.camera)}${roll.iso ? ` · ISO ${escapeHtml(roll.iso)}` : ''} · ${exposures.length} 次曝光</p></div><div class="film-roll-actions"><button data-film-roll-status="${escapeHtml(roll.id)}" data-status="${nextStatus}">${roll.status === 'active' ? '标记拍完' : '继续拍摄'}</button><button data-film-roll-edit="${escapeHtml(roll.id)}">编辑</button><button class="danger" data-film-roll-delete="${escapeHtml(roll.id)}">删除</button></div></div><div class="film-exposures">${exposures.map((item) => filmExposureHtml(item, roll.id)).join('') || empty('这卷还没有曝光记录')}</div><button class="film-add-exposure" data-film-exposure-add="${escapeHtml(roll.id)}">＋ 记录一次曝光</button></article>`;
+}
+function renderFilmDiary() {
+  const active = state.filmRolls.filter((roll) => roll.status === 'active');
+  const finished = state.filmRolls.filter((roll) => roll.status === 'finished');
+  $('#film-active-count').textContent = `${active.length} 卷`;
+  $('#film-finished-count').textContent = `${finished.length} 卷`;
+  $('#film-active-rolls').innerHTML = active.map(filmRollHtml).join('') || empty('还没有拍摄中的胶卷');
+  $('#film-finished-rolls').innerHTML = finished.map(filmRollHtml).join('') || empty('拍完的胶卷会留在这里');
+}
 function netdiskResultHtml(item) { return `<article class="netdisk-card"><div><span class="label">${escapeHtml(netdiskSourceName(item.source) || 'NETDISK')}</span><h3><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></h3>${item.description ? `<p>${escapeHtml(item.description)}</p>` : ''}<div class="netdisk-meta">${[item.size, item.time, host(item.url)].filter(Boolean).map((value) => `<span>${escapeHtml(value)}</span>`).join('')}</div></div><a class="open-link" href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">打开 →</a></article>`; }
 
 const forms = {
   bookmarks: { title:'添加网站', label:'NEW BOOKMARK', fields:() => `<div class="field"><label>名称</label><input name="title" required placeholder="例如：少数派"></div><div class="field"><label>网址</label><input name="url" type="url" required placeholder="https://"></div><div class="field"><label>收藏夹</label><select name="category" required>${folderOptions()}</select></div><div class="field"><label>备注</label><textarea name="note" placeholder="为什么收藏它？"></textarea></div>` },
   excerpts: { title:'添加摘录', label:'NEW EXCERPT', fields:(item = {}) => `<div class="field"><label>内容</label><textarea name="content" required maxlength="3000" placeholder="写下让你停顿的那句话…">${escapeHtml(item.content || '')}</textarea></div><div class="form-row"><div class="field"><label>作者 / 歌手</label><input name="author" value="${escapeHtml(item.author || '')}" placeholder="例如：加缪、陈奕迅"></div><div class="field"><label>出处</label><input name="source" value="${escapeHtml(item.source || '')}" placeholder="书名、歌名、电影或其他来源"></div></div><div class="field"><label>摘录日期</label><input name="excerptDate" type="date" value="${escapeHtml(item.excerptDate || dateKey())}"></div><div class="field"><label>备注（可选）</label><textarea name="note" maxlength="500" placeholder="当时的想法、页码或场景…">${escapeHtml(item.note || '')}</textarea></div><div class="field"><label class="checkbox-field"><input name="anonymous" type="checkbox" ${item.isAnonymous ? 'checked' : ''}> 匿名发布</label></div>` },
   writings: { title:'写点什么', label:'WRITE SOMETHING', fields:(item = {}) => `<div class="field"><label>内容</label><textarea name="content" required maxlength="8000" placeholder="写下此刻想说的话…">${escapeHtml(item.content || '')}</textarea></div><div class="form-row"><div class="field"><label>谁可以看到</label><select name="visibility" required><option value="private" ${item.visibility !== 'public' ? 'selected' : ''}>仅自己可见</option><option value="public" ${item.visibility === 'public' ? 'selected' : ''}>公开</option></select></div><div class="field"><label>署名方式</label><select name="anonymous" required><option value="false" ${!item.isAnonymous ? 'selected' : ''}>实名</option><option value="true" ${item.isAnonymous ? 'selected' : ''}>匿名</option></select></div></div>` },
+  'film-rolls': { title:'新建胶卷', label:'NEW FILM ROLL', fields:(item = {}) => `<div class="field"><label>胶卷名称 / 型号</label><input name="filmStock" required maxlength="160" value="${escapeHtml(item.filmStock || '')}" placeholder="例如：Kodak Gold 200"></div><div class="form-row"><div class="field"><label>相机</label><input name="camera" required maxlength="160" value="${escapeHtml(item.camera || '')}" placeholder="例如：Nikon FM2"></div><div class="field"><label>感光度（可选）</label><input name="iso" type="number" min="1" max="25600" value="${escapeHtml(item.iso ?? '')}" placeholder="200"></div></div><div class="field"><label>状态</label><select name="status"><option value="active" ${item.status !== 'finished' ? 'selected' : ''}>拍摄中</option><option value="finished" ${item.status === 'finished' ? 'selected' : ''}>已拍完</option></select></div>` },
+  'film-exposures': { title:'记录一次曝光', label:'NEW EXPOSURE', fields:(item = {}) => `<div class="form-row"><div class="field"><label>画幅序号</label><input name="frameNumber" type="number" min="0" max="999" required value="${escapeHtml(item.frameNumber ?? 1)}"></div><div class="field"><label>拍摄时间</label><input name="takenAt" type="datetime-local" required value="${escapeHtml(localDateTimeValue(item.takenAt || ''))}"></div></div><div class="field"><label>地点（可选）</label><input name="location" maxlength="300" value="${escapeHtml(item.location || '')}" placeholder="例如：上海 · 武康路"></div><div class="field"><label>当时的想法（可选）</label><textarea name="thoughts" maxlength="3000" placeholder="为什么想拍下这一幕？">${escapeHtml(item.thoughts || '')}</textarea></div><div class="form-row"><div class="field"><label>镜头（可选）</label><input name="lens" maxlength="160" value="${escapeHtml(item.lens || '')}" placeholder="50mm f/1.8"></div><div class="field"><label>光圈（可选）</label><input name="aperture" maxlength="40" value="${escapeHtml(item.aperture || '')}" placeholder="f/5.6"></div></div><div class="field"><label>快门速度（可选）</label><input name="shutterSpeed" maxlength="40" value="${escapeHtml(item.shutterSpeed || '')}" placeholder="1/250s"></div>` },
   folders: { title:'新建收藏夹', label:'NEW COLLECTION', fields:`<div class="field"><label>收藏夹名称</label><input name="name" required maxlength="30" placeholder="例如：旅行灵感"></div>` },
   todos: { title:'添加待办', label:'NEW TO-DO', fields:`<div class="field"><label>待办内容</label><input name="title" required placeholder="我准备完成…"></div><div class="form-row"><div class="field"><label>优先级</label><select name="priority"><option value="medium">普通</option><option value="high">重要</option><option value="low">低</option></select></div><div class="field"><label>截止日期</label><input name="dueDate" type="date"></div></div>` },
   plans: { title:'制定计划', label:'NEW PLAN', fields:() => `<div class="field"><label>计划名称</label><input name="title" required placeholder="例如：晨间阅读"></div><div class="form-row"><div class="field"><label>计划类型</label><select name="frequencyType"><option value="daily">日常计划</option><option value="weekly">周常计划</option><option value="monthly">月度计划</option></select></div><div class="field"><label>每周期目标次数</label><input name="targetCount" type="number" min="1" max="99" value="1" required></div></div><div class="form-row"><div class="field"><label>开始日期</label><input name="startDate" type="date" required value="${state.planDate}"></div><div class="field"><label>结束日期（可选）</label><input name="endDate" type="date"></div></div><div class="form-row"><div class="field"><label>提醒时间</label><input name="time" type="time" required value="09:00"></div><div class="field"><label>每次时长（分钟）</label><input name="duration" type="number" min="5" max="480" value="30"></div></div><div class="field"><label>标记颜色</label><select name="color"><option value="violet">紫色</option><option value="orange">橙色</option><option value="green">绿色</option><option value="blue">蓝色</option></select></div>` }
 };
 
-function openModal(type, item = null) {
+function openModal(type, item = null, rollId = '') {
   const config = forms[type];
   const editing = Boolean(item?.id);
-  $('#modal-title').textContent = editing ? `编辑${type === 'excerpts' ? '摘录' : type === 'writings' ? '内容' : '项目'}` : config.title; $('#modal-label').textContent = editing ? `EDIT ${type === 'writings' ? 'WRITING' : 'EXCERPT'}` : config.label; $('#form-fields').innerHTML = typeof config.fields === 'function' ? config.fields(item || {}) : config.fields;
-  $('#item-form').dataset.type = type; $('#item-form').dataset.id = item?.id || ''; $('#modal').hidden = false; $('#quick-menu').hidden = true;
+  const editNames = { excerpts:'摘录', writings:'内容', 'film-rolls':'胶卷', 'film-exposures':'曝光记录' };
+  $('#modal-title').textContent = editing ? `编辑${editNames[type] || '项目'}` : config.title; $('#modal-label').textContent = editing ? `EDIT ${type === 'film-rolls' ? 'FILM ROLL' : type === 'film-exposures' ? 'EXPOSURE' : type === 'writings' ? 'WRITING' : 'EXCERPT'}` : config.label; $('#form-fields').innerHTML = typeof config.fields === 'function' ? config.fields(item || {}) : config.fields;
+  $('#item-form').dataset.type = type; $('#item-form').dataset.id = item?.id || ''; $('#item-form').dataset.rollId = rollId; $('#modal').hidden = false; $('#quick-menu').hidden = true;
   setTimeout(() => $('#item-form input')?.focus(), 50);
 }
-function closeModal() { $('#modal').hidden = true; $('#item-form').reset(); delete $('#item-form').dataset.id; }
+function closeModal() { $('#modal').hidden = true; $('#item-form').reset(); delete $('#item-form').dataset.id; delete $('#item-form').dataset.rollId; }
 function toast(message) { const el=$('#toast'); el.textContent=message; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1800); }
 
 document.addEventListener('click', async (event) => {
@@ -1173,6 +1198,51 @@ document.addEventListener('click', async (event) => {
     } catch (error) {
       toast(error.message);
     }
+    return;
+  }
+  if (event.target.closest('[data-film-roll-add]')) {
+    openModal('film-rolls');
+    return;
+  }
+  const filmExposureAdd = event.target.closest('[data-film-exposure-add]');
+  if (filmExposureAdd) {
+    const roll = state.filmRolls.find((item) => item.id === filmExposureAdd.dataset.filmExposureAdd);
+    if (!roll) return;
+    const nextFrame = Math.max(0, ...(roll.exposures || []).map((item) => Number(item.frameNumber) || 0)) + 1;
+    openModal('film-exposures', { frameNumber:nextFrame }, roll.id);
+    return;
+  }
+  const filmRollEdit = event.target.closest('[data-film-roll-edit]');
+  if (filmRollEdit) {
+    const roll = state.filmRolls.find((item) => item.id === filmRollEdit.dataset.filmRollEdit);
+    if (roll) openModal('film-rolls', roll);
+    return;
+  }
+  const filmExposureEdit = event.target.closest('[data-film-exposure-edit]');
+  if (filmExposureEdit) {
+    const roll = state.filmRolls.find((item) => item.id === filmExposureEdit.dataset.rollId);
+    const exposure = roll?.exposures?.find((item) => item.id === filmExposureEdit.dataset.filmExposureEdit);
+    if (exposure) openModal('film-exposures', exposure, roll.id);
+    return;
+  }
+  const filmRollStatus = event.target.closest('[data-film-roll-status]');
+  if (filmRollStatus) {
+    await mutate(() => request(`/api/film-rolls/${filmRollStatus.dataset.filmRollStatus}`, { method:'PATCH', body:JSON.stringify({ status:filmRollStatus.dataset.status }) }), filmRollStatus.dataset.status === 'finished' ? '胶卷已归档' : '胶卷已恢复拍摄');
+    return;
+  }
+  const filmExposureDelete = event.target.closest('[data-film-exposure-delete]');
+  if (filmExposureDelete) {
+    if (!confirm('确定删除这条曝光记录吗？')) return;
+    await mutate(() => request(`/api/film-rolls/${filmExposureDelete.dataset.rollId}/exposures/${filmExposureDelete.dataset.filmExposureDelete}`, { method:'DELETE' }), '曝光记录已删除');
+    return;
+  }
+  const filmRollDelete = event.target.closest('[data-film-roll-delete]');
+  if (filmRollDelete) {
+    const roll = state.filmRolls.find((item) => item.id === filmRollDelete.dataset.filmRollDelete);
+    if (!roll) return;
+    const count = roll.exposures?.length || 0;
+    if (!confirm(count ? `确定删除「${roll.filmStock}」吗？其中 ${count} 条曝光记录也会一起删除。` : `确定删除「${roll.filmStock}」吗？`)) return;
+    await mutate(() => request(`/api/film-rolls/${roll.id}`, { method:'DELETE' }), '胶卷已删除');
     return;
   }
   const edit = event.target.closest('[data-edit]');
@@ -1319,6 +1389,22 @@ document.addEventListener('click', async (event) => {
 
 $('#item-form').addEventListener('submit', async (event) => {
   event.preventDefault(); const form = event.currentTarget; const type=form.dataset.type; const itemId=form.dataset.id; const payload=Object.fromEntries(new FormData(form));
+  if (type === 'film-rolls') {
+    payload.iso = payload.iso === '' ? null : Number(payload.iso);
+    const editing = Boolean(itemId);
+    await mutate(() => request(`/api/film-rolls${editing ? `/${itemId}` : ''}`, { method:editing ? 'PATCH' : 'POST', body:JSON.stringify(payload) }), editing ? '胶卷已更新' : '胶卷已创建');
+    closeModal();
+    return;
+  }
+  if (type === 'film-exposures') {
+    payload.frameNumber = Number(payload.frameNumber);
+    payload.takenAt = new Date(payload.takenAt).toISOString();
+    const editing = Boolean(itemId);
+    const path = `/api/film-rolls/${form.dataset.rollId}/exposures${editing ? `/${itemId}` : ''}`;
+    await mutate(() => request(path, { method:editing ? 'PATCH' : 'POST', body:JSON.stringify(payload) }), editing ? '曝光记录已更新' : '曝光记录已添加');
+    closeModal();
+    return;
+  }
   if (type === 'excerpts') payload.anonymous = Boolean(form.elements.anonymous.checked);
   if (type === 'writings') payload.anonymous = form.elements.anonymous.value === 'true';
   if (payload.duration) payload.duration=Number(payload.duration);

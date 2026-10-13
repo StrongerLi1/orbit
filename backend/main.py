@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 import json
 import logging
@@ -68,11 +68,15 @@ from .repository import (
     create_book,
     create_book_review,
     create_book_read,
+    create_film_exposure,
+    create_film_roll,
     create_item,
     create_writing_post,
     delete_book,
     delete_book_review,
     delete_book_read,
+    delete_film_exposure,
+    delete_film_roll,
     delete_item,
     delete_writing_post,
     folder_exists,
@@ -85,6 +89,8 @@ from .repository import (
     get_book_by_share_token,
     get_book_storage,
     get_item,
+    get_film_exposure_for_owner,
+    get_film_roll_for_owner,
     get_writing_post_for_owner,
     list_admin_hermes_conversations,
     list_book_reviews,
@@ -93,6 +99,7 @@ from .repository import (
     list_book_reads,
     list_books,
     list_items,
+    list_film_rolls,
     list_writing_posts,
     ensure_book_share,
     hermes_chat_user_lock,
@@ -103,6 +110,8 @@ from .repository import (
     update_book,
     update_book_review_anonymity,
     update_book_read,
+    update_film_exposure,
+    update_film_roll,
     update_item,
     update_writing_post,
 )
@@ -243,6 +252,66 @@ def validate(collection: str, input_data: dict[str, Any]) -> dict[str, Any]:
         }
 
     raise HTTPException(status_code=404, detail="Not found")
+
+
+def _film_text(item: dict[str, Any], key: str, label: str, max_length: int, required: bool = False) -> str:
+    value = item.get(key, "")
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=f"{label}必须是文本")
+    value = value.strip()
+    if required and not value:
+        raise HTTPException(status_code=422, detail=f"{label}不能为空")
+    if len(value) > max_length:
+        raise HTTPException(status_code=422, detail=f"{label}不能超过 {max_length} 个字符")
+    return value
+
+
+def validate_film_roll(input_data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(input_data, dict):
+        raise HTTPException(status_code=422, detail="胶卷数据格式无效")
+    item = dict(input_data or {})
+    iso = item.get("iso")
+    if iso is None or iso == "":
+        iso = None
+    elif isinstance(iso, bool) or not isinstance(iso, int) or not 1 <= iso <= 25_600:
+        raise HTTPException(status_code=422, detail="感光度必须是 1 到 25600 之间的整数")
+    status = item.get("status", "active")
+    if not isinstance(status, str) or status not in {"active", "finished"}:
+        raise HTTPException(status_code=422, detail="胶卷状态必须为 active 或 finished")
+    return {
+        "filmStock": _film_text(item, "filmStock", "胶卷名称/型号", 160, required=True),
+        "iso": iso,
+        "camera": _film_text(item, "camera", "相机", 160, required=True),
+        "status": status,
+    }
+
+
+def validate_film_exposure(input_data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(input_data, dict):
+        raise HTTPException(status_code=422, detail="曝光数据格式无效")
+    item = dict(input_data or {})
+    frame_number = item.get("frameNumber")
+    if isinstance(frame_number, bool) or not isinstance(frame_number, int) or not 0 <= frame_number <= 999:
+        raise HTTPException(status_code=422, detail="画幅序号必须是 0 到 999 之间的整数")
+    taken_at = item.get("takenAt")
+    if not isinstance(taken_at, str):
+        raise HTTPException(status_code=422, detail="拍摄时间格式无效")
+    try:
+        captured = datetime.fromisoformat(taken_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="拍摄时间格式无效") from error
+    if captured.tzinfo is None or captured.utcoffset() is None:
+        raise HTTPException(status_code=422, detail="拍摄时间必须包含时区")
+    normalized_time = captured.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return {
+        "frameNumber": frame_number,
+        "takenAt": normalized_time,
+        "location": _film_text(item, "location", "地点", 300),
+        "thoughts": _film_text(item, "thoughts", "想法", 3000),
+        "lens": _film_text(item, "lens", "镜头", 160),
+        "aperture": _film_text(item, "aperture", "光圈", 40),
+        "shutterSpeed": _film_text(item, "shutterSpeed", "快门速度", 40),
+    }
 
 
 def _number(value: Any, fallback: float) -> float:
@@ -1598,6 +1667,78 @@ def library_delete_read(book_id: str, read_id: str, request: Request):
     _library_book_or_404(book_id, user["id"])
     if not delete_book_read(book_id, read_id, user["id"]):
         raise HTTPException(status_code=404, detail="阅读记录不存在")
+    return {"ok": True}
+
+
+@app.get("/api/film-rolls")
+def film_roll_list(request: Request):
+    user = require_permission(request, "content:read")
+    return list_film_rolls(user["id"])
+
+
+@app.post("/api/film-rolls", status_code=201)
+async def film_roll_create(request: Request):
+    user = require_permission(request, "content:write")
+    return create_film_roll(validate_film_roll(await request.json()), user["id"])
+
+
+@app.patch("/api/film-rolls/{roll_id}")
+async def film_roll_update(roll_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    existing = get_film_roll_for_owner(roll_id, user["id"])
+    if not existing:
+        raise HTTPException(status_code=404, detail="胶卷不存在")
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="胶卷数据格式无效")
+    updated = update_film_roll(roll_id, validate_film_roll({**existing, **data}), user["id"])
+    if not updated:
+        raise HTTPException(status_code=404, detail="胶卷不存在")
+    return updated
+
+
+@app.delete("/api/film-rolls/{roll_id}")
+def film_roll_delete(roll_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    if not delete_film_roll(roll_id, user["id"]):
+        raise HTTPException(status_code=404, detail="胶卷不存在")
+    return {"ok": True}
+
+
+@app.post("/api/film-rolls/{roll_id}/exposures", status_code=201)
+async def film_exposure_create(roll_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    created = create_film_exposure(roll_id, validate_film_exposure(await request.json()), user["id"])
+    if not created:
+        raise HTTPException(status_code=404, detail="胶卷不存在")
+    return created
+
+
+@app.patch("/api/film-rolls/{roll_id}/exposures/{exposure_id}")
+async def film_exposure_update(roll_id: str, exposure_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    existing = get_film_exposure_for_owner(exposure_id, roll_id, user["id"])
+    if not existing:
+        raise HTTPException(status_code=404, detail="曝光记录不存在")
+    data = await request.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=422, detail="曝光数据格式无效")
+    updated = update_film_exposure(
+        exposure_id,
+        roll_id,
+        validate_film_exposure({**existing, **data}),
+        user["id"],
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="曝光记录不存在")
+    return updated
+
+
+@app.delete("/api/film-rolls/{roll_id}/exposures/{exposure_id}")
+def film_exposure_delete(roll_id: str, exposure_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    if not delete_film_exposure(exposure_id, roll_id, user["id"]):
+        raise HTTPException(status_code=404, detail="曝光记录不存在")
     return {"ok": True}
 
 

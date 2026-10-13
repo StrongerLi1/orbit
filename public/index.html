@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20260914-library-share">
+  <link rel="stylesheet" href="/styles.css?v=20261012-film-diary">
   <link rel="stylesheet" href="/writings.css?v=20260719-writing-posts">
 </head>
 <body>
@@ -45,6 +45,7 @@
         <a class="nav-link" id="lx-music-nav" href="#" hidden><span>♫</span>音乐</a>
         <a class="nav-link" href="#excerpts" data-page="excerpts"><span>“</span>摘录</a>
         <a class="nav-link" href="#writings" data-page="writings"><span>✎</span>写点什么</a>
+        <a class="nav-link" href="#film-diary" data-page="film-diary"><span>◉</span>胶片日记</a>
         <a class="nav-link" href="#plans" data-page="plans"><span>◷</span>日常计划</a>
         <a class="nav-link" href="#todos" data-page="todos"><span>✓</span>待办事项</a>
         <a class="nav-link" href="#hermes-chat" data-page="hermes-chat" id="hermes-chat-nav" hidden><span>☤</span>Hermes 聊天</a>
@@ -104,6 +105,18 @@
         <section class="page" id="writings">
           <div class="page-title"><div><p class="eyebrow">A PLACE TO WRITE</p><h1>写点什么</h1><p>记下今天的心情、念头，或想留给自己的话。</p></div><button class="primary" data-add="writings">＋ 写点什么</button></div>
           <div id="writings-grid" class="writings-grid"></div>
+        </section>
+
+        <section class="page" id="film-diary">
+          <div class="page-title"><div><p class="eyebrow">FILM JOURNAL</p><h1>胶片日记</h1><p>记住每一次按下快门时的光线、地点和念头。</p></div><button class="primary" data-film-roll-add>＋ 新建胶卷</button></div>
+          <section class="film-section">
+            <div class="film-section-head"><div><span class="label">IN CAMERA</span><h2>拍摄中</h2></div><span class="count" id="film-active-count">0 卷</span></div>
+            <div id="film-active-rolls" class="film-rolls"></div>
+          </section>
+          <section class="film-section film-history">
+            <div class="film-section-head"><div><span class="label">ARCHIVE</span><h2>已拍完</h2></div><span class="count" id="film-finished-count">0 卷</span></div>
+            <div id="film-finished-rolls" class="film-rolls"></div>
+          </section>
         </section>
 
         <section class="page" id="bookmarks">
@@ -280,6 +293,6 @@
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20260914-library-share"></script>
+  <script src="/app.js?v=20261012-film-diary"></script>
 </body>
 </html>

@@ -275,6 +275,197 @@ def delete_writing_post(post_id: str, current_user_id: str) -> bool:
             return cursor.rowcount > 0
 
 
+def _film_exposure_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "rollId": row["roll_id"],
+        "frameNumber": row["frame_number"],
+        "takenAt": row["taken_at"],
+        "location": row["location"],
+        "thoughts": row["thoughts"],
+        "lens": row["lens"],
+        "aperture": row["aperture"],
+        "shutterSpeed": row["shutter_speed"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _film_roll_row(row: dict[str, Any], exposures: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "filmStock": row["film_stock"],
+        "iso": row["iso"],
+        "camera": row["camera"],
+        "status": row["status"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "exposures": exposures or [],
+    }
+
+
+def list_film_rolls(current_user_id: str) -> list[dict[str, Any]]:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT * FROM film_rolls
+                WHERE owner_user_id = %s
+                ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, updated_at DESC
+                """,
+                (current_user_id,),
+            )
+            roll_rows = cursor.fetchall()
+            if not roll_rows:
+                return []
+            cursor.execute(
+                """
+                SELECT e.* FROM film_exposures e
+                INNER JOIN film_rolls r ON r.id = e.roll_id
+                WHERE r.owner_user_id = %s
+                ORDER BY e.frame_number ASC, e.taken_at ASC, e.created_at ASC
+                """,
+                (current_user_id,),
+            )
+            grouped: dict[str, list[dict[str, Any]]] = {row["id"]: [] for row in roll_rows}
+            for row in cursor.fetchall():
+                grouped.setdefault(row["roll_id"], []).append(_film_exposure_row(row))
+            return [_film_roll_row(row, grouped[row["id"]]) for row in roll_rows]
+
+
+def get_film_roll_for_owner(roll_id: str, current_user_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT * FROM film_rolls WHERE id = %s AND owner_user_id = %s",
+                (roll_id, current_user_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            cursor.execute(
+                """
+                SELECT * FROM film_exposures
+                WHERE roll_id = %s
+                ORDER BY frame_number ASC, taken_at ASC, created_at ASC
+                """,
+                (roll_id,),
+            )
+            return _film_roll_row(row, [_film_exposure_row(item) for item in cursor.fetchall()])
+
+
+def create_film_roll(item: dict[str, Any], current_user_id: str) -> dict[str, Any]:
+    roll_id = str(uuid.uuid4())
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO film_rolls
+                    (id, owner_user_id, film_stock, iso, camera, status, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (roll_id, current_user_id, item["filmStock"], item["iso"], item["camera"], item["status"], created_at, created_at),
+            )
+    created = get_film_roll_for_owner(roll_id, current_user_id)
+    if created is None:
+        raise RuntimeError("胶卷创建失败")
+    return created
+
+
+def update_film_roll(roll_id: str, item: dict[str, Any], current_user_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE film_rolls
+                SET film_stock = %s, iso = %s, camera = %s, status = %s, updated_at = %s
+                WHERE id = %s AND owner_user_id = %s
+                """,
+                (item["filmStock"], item["iso"], item["camera"], item["status"], now_iso(), roll_id, current_user_id),
+            )
+    return get_film_roll_for_owner(roll_id, current_user_id)
+
+
+def delete_film_roll(roll_id: str, current_user_id: str) -> bool:
+    if get_film_roll_for_owner(roll_id, current_user_id) is None:
+        return False
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM film_exposures WHERE roll_id = %s", (roll_id,))
+            cursor.execute("DELETE FROM film_rolls WHERE id = %s AND owner_user_id = %s", (roll_id, current_user_id))
+            return cursor.rowcount > 0
+
+
+def get_film_exposure_for_owner(exposure_id: str, roll_id: str, current_user_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT e.* FROM film_exposures e
+                INNER JOIN film_rolls r ON r.id = e.roll_id
+                WHERE e.id = %s AND e.roll_id = %s AND r.owner_user_id = %s
+                """,
+                (exposure_id, roll_id, current_user_id),
+            )
+            row = cursor.fetchone()
+            return _film_exposure_row(row) if row else None
+
+
+def create_film_exposure(roll_id: str, item: dict[str, Any], current_user_id: str) -> dict[str, Any] | None:
+    if get_film_roll_for_owner(roll_id, current_user_id) is None:
+        return None
+    exposure_id = str(uuid.uuid4())
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO film_exposures
+                    (id, roll_id, frame_number, taken_at, location, thoughts, lens, aperture, shutter_speed, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    exposure_id, roll_id, item["frameNumber"], item["takenAt"], item["location"], item["thoughts"],
+                    item["lens"], item["aperture"], item["shutterSpeed"], created_at, created_at,
+                ),
+            )
+    return get_film_exposure_for_owner(exposure_id, roll_id, current_user_id)
+
+
+def update_film_exposure(exposure_id: str, roll_id: str, item: dict[str, Any], current_user_id: str) -> dict[str, Any] | None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE film_exposures e
+                INNER JOIN film_rolls r ON r.id = e.roll_id
+                SET e.frame_number = %s, e.taken_at = %s, e.location = %s, e.thoughts = %s,
+                    e.lens = %s, e.aperture = %s, e.shutter_speed = %s, e.updated_at = %s
+                WHERE e.id = %s AND e.roll_id = %s AND r.owner_user_id = %s
+                """,
+                (
+                    item["frameNumber"], item["takenAt"], item["location"], item["thoughts"], item["lens"],
+                    item["aperture"], item["shutterSpeed"], now_iso(), exposure_id, roll_id, current_user_id,
+                ),
+            )
+    return get_film_exposure_for_owner(exposure_id, roll_id, current_user_id)
+
+
+def delete_film_exposure(exposure_id: str, roll_id: str, current_user_id: str) -> bool:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                DELETE e FROM film_exposures e
+                INNER JOIN film_rolls r ON r.id = e.roll_id
+                WHERE e.id = %s AND e.roll_id = %s AND r.owner_user_id = %s
+                """,
+                (exposure_id, roll_id, current_user_id),
+            )
+            return cursor.rowcount > 0
+
+
 def folder_exists(name: str) -> bool:
     with connection() as conn:
         with conn.cursor() as cursor:

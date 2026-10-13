@@ -229,6 +229,11 @@ def delete_user_account(user_id: str) -> dict[str, bool]:
             cursor.execute("DELETE FROM todos WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM plans WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM writing_posts WHERE owner_user_id = %s", (user_id,))
+            cursor.execute(
+                "DELETE FROM film_exposures WHERE roll_id IN (SELECT id FROM film_rolls WHERE owner_user_id = %s)",
+                (user_id,),
+            )
+            cursor.execute("DELETE FROM film_rolls WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM user_roles WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
     return {"ok": True}

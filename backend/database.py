@@ -217,6 +217,39 @@ def initialize_database() -> None:
             )
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS film_rolls (
+                    id VARCHAR(64) PRIMARY KEY,
+                    owner_user_id VARCHAR(64) NOT NULL,
+                    film_stock VARCHAR(160) NOT NULL,
+                    iso INT NULL DEFAULT NULL,
+                    camera VARCHAR(160) NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'active',
+                    created_at VARCHAR(40) NOT NULL,
+                    updated_at VARCHAR(40) NOT NULL,
+                    INDEX idx_film_rolls_owner_status_updated (owner_user_id, status, updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS film_exposures (
+                    id VARCHAR(64) PRIMARY KEY,
+                    roll_id VARCHAR(64) NOT NULL,
+                    frame_number INT NOT NULL,
+                    taken_at VARCHAR(40) NOT NULL,
+                    location VARCHAR(300) NOT NULL DEFAULT '',
+                    thoughts TEXT NOT NULL,
+                    lens VARCHAR(160) NOT NULL DEFAULT '',
+                    aperture VARCHAR(40) NOT NULL DEFAULT '',
+                    shutter_speed VARCHAR(40) NOT NULL DEFAULT '',
+                    created_at VARCHAR(40) NOT NULL,
+                    updated_at VARCHAR(40) NOT NULL,
+                    INDEX idx_film_exposures_roll_frame_taken (roll_id, frame_number, taken_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS books (
                     id VARCHAR(64) PRIMARY KEY,
                     title VARCHAR(300) NOT NULL,
