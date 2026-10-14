@@ -51,10 +51,21 @@ class OrbitClient(context: Context) {
     suspend fun plans() = OrbitJson.plans(request("GET", "/api/plans"))
     suspend fun folders() = OrbitJson.folders(request("GET", "/api/folders"))
     suspend fun excerpts() = OrbitJson.excerpts(request("GET", "/api/excerpts"))
+    suspend fun writings() = OrbitJson.writings(request("GET", "/api/writings"))
+    suspend fun filmRolls() = OrbitJson.filmRolls(request("GET", "/api/film-rolls"))
 
     suspend fun create(collection: String, payload: JSONObject) = request("POST", "/api/$collection", payload)
     suspend fun patch(collection: String, id: String, payload: JSONObject) = request("PATCH", "/api/$collection/$id", payload)
     suspend fun delete(collection: String, id: String) = request("DELETE", "/api/$collection/$id")
+
+    suspend fun createFilmExposure(rollId: String, payload: JSONObject) =
+        request("POST", "/api/film-rolls/$rollId/exposures", payload)
+
+    suspend fun updateFilmExposure(rollId: String, exposureId: String, payload: JSONObject) =
+        request("PATCH", "/api/film-rolls/$rollId/exposures/$exposureId", payload)
+
+    suspend fun deleteFilmExposure(rollId: String, exposureId: String) =
+        request("DELETE", "/api/film-rolls/$rollId/exposures/$exposureId")
 
     suspend fun searchNetdisk(keyword: String): NetdiskSearch {
         val query = URLEncoder.encode(keyword.trim(), StandardCharsets.UTF_8.name())

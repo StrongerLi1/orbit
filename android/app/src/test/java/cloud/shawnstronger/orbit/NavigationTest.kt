@@ -29,12 +29,17 @@ class NavigationTest {
     @Test
     fun moreNavigationUsesServerPermissions() {
         val normal = visibleMoreRoutes(user("content:read", "netdisk:search", "hermes:chat"))
-        assertEquals(listOf(OrbitRoute.Excerpts, OrbitRoute.Netdisk, OrbitRoute.Chat), normal)
+        assertEquals(
+            listOf(OrbitRoute.Writings, OrbitRoute.FilmDiary, OrbitRoute.Excerpts, OrbitRoute.Netdisk, OrbitRoute.Chat),
+            normal,
+        )
         assertFalse(OrbitRoute.Admin in normal)
 
         val admin = visibleMoreRoutes(user("content:read", "users:manage", "agents:manage"))
         assertTrue(OrbitRoute.Admin in admin)
         assertTrue(OrbitRoute.Hermes in admin)
+
+        assertEquals(emptyList<OrbitRoute>(), visibleMoreRoutes(user()).filter { it != OrbitRoute.More })
     }
 
     @Test

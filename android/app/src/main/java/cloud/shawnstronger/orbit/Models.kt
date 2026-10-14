@@ -3,7 +3,11 @@ package cloud.shawnstronger.orbit
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
 import java.time.temporal.TemporalAdjusters
 import java.net.URI
 
@@ -62,6 +66,50 @@ data class Excerpt(
     val createdByName: String = "admin",
     val canManage: Boolean = false,
 )
+data class WritingPost(
+    val id: String,
+    val content: String,
+    val visibility: String,
+    val isAnonymous: Boolean,
+    val createdAt: String,
+    val updatedAt: String,
+    val createdByName: String,
+    val isOwn: Boolean,
+    val canManage: Boolean,
+)
+data class FilmExposure(
+    val id: String,
+    val rollId: String,
+    val frameNumber: Int,
+    val takenAt: String,
+    val location: String,
+    val thoughts: String,
+    val lens: String,
+    val aperture: String,
+    val shutterSpeed: String,
+    val createdAt: String,
+    val updatedAt: String,
+)
+data class FilmRoll(
+    val id: String,
+    val filmStock: String,
+    val iso: Int?,
+    val camera: String,
+    val status: String,
+    val createdAt: String,
+    val updatedAt: String,
+    val exposures: List<FilmExposure>,
+)
+
+fun nextFilmFrame(exposures: List<FilmExposure>): Int =
+    ((exposures.maxOfOrNull(FilmExposure::frameNumber) ?: 0) + 1).coerceAtMost(999)
+
+fun filmLocalDateTime(value: String, zone: ZoneId = ZoneId.systemDefault()): LocalDateTime =
+    Instant.parse(value).atZone(zone).toLocalDateTime()
+
+fun filmInstant(date: LocalDate, time: LocalTime, zone: ZoneId = ZoneId.systemDefault()): String =
+    LocalDateTime.of(date, time).atZone(zone).toInstant().toString()
+
 data class ContentBundle(
     val bookmarks: List<Bookmark>,
     val todos: List<Todo>,
@@ -197,6 +245,44 @@ object OrbitJson {
         obj.text("id"), obj.text("content"), obj.text("source"), obj.text("author"),
         obj.text("excerptDate"), obj.text("note"), obj.text("createdAt"),
         obj.text("createdByName", "admin"), obj.optBoolean("canManage", false),
+    )
+
+    fun writings(raw: String) = JSONArray(raw).objects(::writing)
+    fun writing(obj: JSONObject) = WritingPost(
+        id = obj.text("id"),
+        content = obj.text("content"),
+        visibility = obj.text("visibility", "private"),
+        isAnonymous = obj.optBoolean("isAnonymous"),
+        createdAt = obj.text("createdAt"),
+        updatedAt = obj.text("updatedAt"),
+        createdByName = obj.text("createdByName"),
+        isOwn = obj.optBoolean("isOwn"),
+        canManage = obj.optBoolean("canManage"),
+    )
+
+    fun filmRolls(raw: String) = JSONArray(raw).objects(::filmRoll)
+    fun filmRoll(obj: JSONObject) = FilmRoll(
+        id = obj.text("id"),
+        filmStock = obj.text("filmStock"),
+        iso = if (obj.isNull("iso")) null else obj.optInt("iso"),
+        camera = obj.text("camera"),
+        status = obj.text("status", "active"),
+        createdAt = obj.text("createdAt"),
+        updatedAt = obj.text("updatedAt"),
+        exposures = obj.optJSONArray("exposures").objects(::filmExposure),
+    )
+    fun filmExposure(obj: JSONObject) = FilmExposure(
+        id = obj.text("id"),
+        rollId = obj.text("rollId"),
+        frameNumber = obj.optInt("frameNumber"),
+        takenAt = obj.text("takenAt"),
+        location = obj.text("location"),
+        thoughts = obj.text("thoughts"),
+        lens = obj.text("lens"),
+        aperture = obj.text("aperture"),
+        shutterSpeed = obj.text("shutterSpeed"),
+        createdAt = obj.text("createdAt"),
+        updatedAt = obj.text("updatedAt"),
     )
 
     fun netdisk(raw: String): NetdiskSearch {

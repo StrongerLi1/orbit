@@ -10,9 +10,11 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.AdminPanelSettings
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bookmarks
+import androidx.compose.material.icons.outlined.CameraRoll
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.CloudQueue
+import androidx.compose.material.icons.outlined.EditNote
 import androidx.compose.material.icons.outlined.FormatQuote
 import androidx.compose.material.icons.outlined.GridView
 import androidx.compose.material.icons.outlined.Home
@@ -47,6 +49,8 @@ enum class OrbitRoute(
     Plans("计划", Icons.Outlined.Today, "content:read"),
     Todos("待办", Icons.Outlined.CheckCircleOutline, "content:read"),
     More("更多", Icons.Outlined.GridView),
+    Writings("写点什么", Icons.Outlined.EditNote, "content:read"),
+    FilmDiary("胶片日记", Icons.Outlined.CameraRoll, "content:read"),
     Excerpts("摘录", Icons.Outlined.FormatQuote, "content:read"),
     Netdisk("网盘搜索", Icons.Outlined.CloudQueue, "netdisk:search"),
     Chat("Hermes", Icons.Outlined.ChatBubbleOutline, "hermes:chat"),
@@ -55,7 +59,15 @@ enum class OrbitRoute(
 }
 
 val PrimaryRoutes = listOf(OrbitRoute.Dashboard, OrbitRoute.Bookmarks, OrbitRoute.Plans, OrbitRoute.Todos, OrbitRoute.More)
-val MoreRoutes = listOf(OrbitRoute.Excerpts, OrbitRoute.Netdisk, OrbitRoute.Chat, OrbitRoute.Admin, OrbitRoute.Hermes)
+val MoreRoutes = listOf(
+    OrbitRoute.Writings,
+    OrbitRoute.FilmDiary,
+    OrbitRoute.Excerpts,
+    OrbitRoute.Netdisk,
+    OrbitRoute.Chat,
+    OrbitRoute.Admin,
+    OrbitRoute.Hermes,
+)
 
 fun OrbitRoute.bottomDestination(): OrbitRoute = if (this in PrimaryRoutes) this else OrbitRoute.More
 
@@ -144,6 +156,8 @@ fun AppShell(
                 OrbitRoute.Plans -> PlansScreen(state)
                 OrbitRoute.Todos -> TodosScreen(state)
                 OrbitRoute.More -> MoreScreen(state, onRoute, onLogout)
+                OrbitRoute.Writings -> WritingsScreen(state)
+                OrbitRoute.FilmDiary -> FilmDiaryScreen(state)
                 OrbitRoute.Excerpts -> ExcerptsScreen(state)
                 OrbitRoute.Netdisk -> NetdiskScreen(state)
                 OrbitRoute.Chat -> HermesChatScreen(state)

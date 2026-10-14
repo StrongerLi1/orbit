@@ -30,6 +30,8 @@ class OrbitState(val client: OrbitClient) {
     var todos by mutableStateOf(emptyList<Todo>())
     var plans by mutableStateOf(emptyList<Plan>())
     var excerpts by mutableStateOf(emptyList<Excerpt>())
+    var writings by mutableStateOf(emptyList<WritingPost>())
+    var filmRolls by mutableStateOf(emptyList<FilmRoll>())
 
     var netdisk by mutableStateOf<NetdiskSearch?>(null)
     var conversations by mutableStateOf(emptyList<HermesConversation>())
@@ -124,6 +126,62 @@ class OrbitState(val client: OrbitClient) {
             id,
             JSONObject().put("content", content).put("author", author).put("source", source).put("excerptDate", date).put("note", note),
         )
+    }
+
+    suspend fun addWriting(content: String, visibility: String, anonymous: Boolean) = mutate {
+        client.create("writings", writingPayload(content, visibility, anonymous))
+    }
+
+    suspend fun updateWriting(id: String, content: String, visibility: String, anonymous: Boolean) = mutate {
+        client.patch("writings", id, writingPayload(content, visibility, anonymous))
+    }
+
+    suspend fun addFilmRoll(filmStock: String, iso: Int?, camera: String, status: String) = mutate {
+        client.create("film-rolls", filmRollPayload(filmStock, iso, camera, status))
+    }
+
+    suspend fun updateFilmRoll(id: String, filmStock: String, iso: Int?, camera: String, status: String) = mutate {
+        client.patch("film-rolls", id, filmRollPayload(filmStock, iso, camera, status))
+    }
+
+    suspend fun updateFilmRollStatus(item: FilmRoll, status: String) =
+        updateFilmRoll(item.id, item.filmStock, item.iso, item.camera, status)
+
+    suspend fun addFilmExposure(
+        rollId: String,
+        frameNumber: Int,
+        takenAt: String,
+        location: String,
+        thoughts: String,
+        lens: String,
+        aperture: String,
+        shutterSpeed: String,
+    ) = mutate {
+        client.createFilmExposure(
+            rollId,
+            filmExposurePayload(frameNumber, takenAt, location, thoughts, lens, aperture, shutterSpeed),
+        )
+    }
+
+    suspend fun updateFilmExposure(
+        item: FilmExposure,
+        frameNumber: Int,
+        takenAt: String,
+        location: String,
+        thoughts: String,
+        lens: String,
+        aperture: String,
+        shutterSpeed: String,
+    ) = mutate {
+        client.updateFilmExposure(
+            item.rollId,
+            item.id,
+            filmExposurePayload(frameNumber, takenAt, location, thoughts, lens, aperture, shutterSpeed),
+        )
+    }
+
+    suspend fun deleteFilmExposure(item: FilmExposure) = mutate {
+        client.deleteFilmExposure(item.rollId, item.id)
     }
 
     suspend fun addTodo(title: String, priority: String, dueDate: String) = mutate {
@@ -362,6 +420,8 @@ class OrbitState(val client: OrbitClient) {
                     folders = client.folders().sortedWith(compareBy<Folder> { it.sortOrder }.thenByDescending { it.createdAt })
                 },
                 "摘录" to suspend { excerpts = client.excerpts() },
+                "写点什么" to suspend { writings = client.writings() },
+                "胶片日记" to suspend { filmRolls = client.filmRolls() },
             ),
         )
 
@@ -396,6 +456,8 @@ class OrbitState(val client: OrbitClient) {
         todos = emptyList()
         plans = emptyList()
         excerpts = emptyList()
+        writings = emptyList()
+        filmRolls = emptyList()
         conversations = emptyList()
         activeConversation = null
         finishHermesState()
@@ -421,4 +483,32 @@ class OrbitState(val client: OrbitClient) {
     }
 
     private fun HermesConversation?.orEmptyMessages() = this?.messages ?: emptyList()
+
+    private fun writingPayload(content: String, visibility: String, anonymous: Boolean) = JSONObject()
+        .put("content", content)
+        .put("visibility", visibility)
+        .put("anonymous", anonymous)
+
+    private fun filmRollPayload(filmStock: String, iso: Int?, camera: String, status: String) = JSONObject()
+        .put("filmStock", filmStock)
+        .put("iso", iso ?: JSONObject.NULL)
+        .put("camera", camera)
+        .put("status", status)
+
+    private fun filmExposurePayload(
+        frameNumber: Int,
+        takenAt: String,
+        location: String,
+        thoughts: String,
+        lens: String,
+        aperture: String,
+        shutterSpeed: String,
+    ) = JSONObject()
+        .put("frameNumber", frameNumber)
+        .put("takenAt", takenAt)
+        .put("location", location)
+        .put("thoughts", thoughts)
+        .put("lens", lens)
+        .put("aperture", aperture)
+        .put("shutterSpeed", shutterSpeed)
 }

@@ -260,6 +260,8 @@ fun MoreScreen(state: OrbitState, onRoute: (OrbitRoute) -> Unit, onLogout: () ->
     val tools = routes.filter { it != OrbitRoute.Admin && it != OrbitRoute.Hermes }
     val management = routes.filter { it == OrbitRoute.Admin || it == OrbitRoute.Hermes }
     val subtitles = mapOf(
+        OrbitRoute.Writings to "写下日记、短句或想留住的念头",
+        OrbitRoute.FilmDiary to "记录胶卷与每一次按下快门",
         OrbitRoute.Excerpts to "收藏与整理值得重读的内容",
         OrbitRoute.Netdisk to "从当前服务器聚合搜索资源",
         OrbitRoute.Chat to "与 Hermes 对话并管理会话",
@@ -682,7 +684,7 @@ private fun HermesDashboardDialog(client: OrbitClient, publicPath: String, onDis
 private fun effectivePort(uri: Uri): Int = when { uri.port >= 0 -> uri.port; uri.scheme == "https" -> 443; else -> 80 }
 
 @Composable
-private fun ConfirmDialog(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+internal fun ConfirmDialog(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { Button(onClick = onConfirm, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError)) { Text("确定") } },
@@ -760,7 +762,7 @@ private fun PlanDialog(onDismiss: () -> Unit, onSubmit: (String, String, Int, St
 }
 
 @Composable
-private fun FormDialog(title: String, onDismiss: () -> Unit, valid: Boolean, onSubmit: () -> Unit, content: @Composable () -> Unit) {
+internal fun FormDialog(title: String, onDismiss: () -> Unit, valid: Boolean, onSubmit: () -> Unit, content: @Composable () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { Button(onClick = onSubmit, enabled = valid) { Text("保存") } },
@@ -771,7 +773,7 @@ private fun FormDialog(title: String, onDismiss: () -> Unit, valid: Boolean, onS
 }
 
 @Composable
-private fun DatePickerField(label: String, value: String, allowEmpty: Boolean, onValueChange: (String) -> Unit) {
+internal fun DatePickerField(label: String, value: String, allowEmpty: Boolean, onValueChange: (String) -> Unit) {
     val context = LocalContext.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         OutlinedButton(
@@ -792,7 +794,7 @@ private fun DatePickerField(label: String, value: String, allowEmpty: Boolean, o
 }
 
 @Composable
-private fun TimePickerField(label: String, value: String, modifier: Modifier = Modifier, onValueChange: (String) -> Unit) {
+internal fun TimePickerField(label: String, value: String, modifier: Modifier = Modifier, onValueChange: (String) -> Unit) {
     val context = LocalContext.current
     OutlinedButton(
         onClick = {

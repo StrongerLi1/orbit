@@ -6,6 +6,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.Assert.assertThrows
 import kotlinx.coroutines.runBlocking
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
 
 class OrbitJsonTest {
     @Test fun permissionsComeFromServerPayload() {
@@ -26,6 +30,39 @@ class OrbitJsonTest {
         assertEquals("1G", result.results.single().size)
     }
 
+    @Test fun diaryDecodersKeepServerPrivacyAndNestedFields() {
+        val writing = OrbitJson.writings(
+            """[{"id":"w1","content":"秘密","visibility":"private","isAnonymous":true,"createdAt":"c","updatedAt":"u","createdByName":"alice","isOwn":true,"canManage":true}]""",
+        ).single()
+        assertEquals("private", writing.visibility)
+        assertEquals("alice", writing.createdByName)
+        assertTrue(writing.isAnonymous)
+        assertTrue(writing.canManage)
+
+        val roll = OrbitJson.filmRolls(
+            """[{"id":"r1","filmStock":"Gold 200","iso":null,"camera":"FM2","status":"active","createdAt":"c","updatedAt":"u","exposures":[{"id":"e1","rollId":"r1","frameNumber":2,"takenAt":"2026-10-12T02:30:00Z","location":"上海","thoughts":"光很好","lens":"50mm","aperture":"f/5.6","shutterSpeed":"1/250s","createdAt":"c","updatedAt":"u"}]}]""",
+        ).single()
+        assertEquals(null, roll.iso)
+        assertEquals("Gold 200", roll.filmStock)
+        assertEquals(2, roll.exposures.single().frameNumber)
+        assertEquals("1/250s", roll.exposures.single().shutterSpeed)
+    }
+
+    @Test fun filmTimeAndNextFrameRoundTrip() {
+        val zone = ZoneId.of("Asia/Shanghai")
+        assertEquals(
+            LocalDateTime.of(2026, 10, 12, 10, 30),
+            filmLocalDateTime("2026-10-12T02:30:00Z", zone),
+        )
+        assertEquals(
+            "2026-10-12T02:30:00Z",
+            filmInstant(LocalDate.of(2026, 10, 12), LocalTime.of(10, 30), zone),
+        )
+        val exposure = FilmExposure("e", "r", 2, "", "", "", "", "", "", "", "")
+        assertEquals(3, nextFilmFrame(listOf(exposure, exposure.copy(id = "e2"))))
+        assertEquals(1, nextFilmFrame(emptyList()))
+    }
+
     @Test fun serverOriginAllowsDefaultAndRequiresHttpsForOverrides() {
         val defaultOrigin = "https://shawnstronger.cloud"
         assertEquals(defaultOrigin, ServerOriginPolicy.resolve(null, defaultOrigin))
@@ -42,9 +79,11 @@ class OrbitJsonTest {
                 "收藏" to suspend { loaded += "收藏" },
                 "待办" to suspend { throw OrbitHttpException(500, "数据库忙") },
                 "计划" to suspend { loaded += "计划" },
+                "写点什么" to suspend { loaded += "写点什么" },
+                "胶片日记" to suspend { loaded += "胶片日记" },
             ),
         )
-        assertEquals(listOf("收藏", "计划"), loaded)
+        assertEquals(listOf("收藏", "计划", "写点什么", "胶片日记"), loaded)
         assertEquals(listOf(ContentSectionFailure("待办", "数据库忙")), failures)
     }
 

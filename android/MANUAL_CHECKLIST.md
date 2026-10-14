@@ -14,7 +14,7 @@ Run this checklist against a disposable account on both API 26 and the current t
 
 - [ ] Light and dark system themes switch without unreadable text, hard-coded white surfaces, or invisible controls.
 - [ ] The bottom navigation exposes Home, Bookmarks, Plans, Todos, and More; secondary pages return to More with both the toolbar and system back actions.
-- [ ] More shows Excerpts, Netdisk, Hermes, account details, and logout; admin-only destinations remain permission-filtered.
+- [ ] More shows Writings, Film Diary, Excerpts, Netdisk, Hermes, account details, and logout; admin-only destinations remain permission-filtered.
 - [ ] Common narrow-phone layouts and 1.3x system font size keep primary actions reachable without horizontal clipping.
 - [ ] Loading, partial-content error, empty, busy, disabled, destructive, banned, interrupted, and generating states use text or icons as well as color.
 
@@ -27,6 +27,18 @@ Run this checklist against a disposable account on both API 26 and the current t
 - [ ] Todo create with priority/due date, complete/reopen, delete, and clear-completed round-trip.
 - [ ] Netdisk search shows source filters and opens a result in the system browser.
 
+## Writings and film diary
+
+- [ ] A user with `content:read` sees both More destinations; a read-only user can browse but sees no create, edit, status, or delete actions.
+- [ ] Writings list own private/public posts plus other users' public posts. Private posts never appear to another user or admin.
+- [ ] Create and edit all public/private × named/anonymous combinations; another viewer sees “匿名用户”, while the author retains management actions.
+- [ ] Delete a writing only after confirmation; blank and over-8,000-character content cannot be submitted from the form.
+- [ ] Create, edit, finish/reopen, and delete a film roll. A roll with exposures shows the cascade count before deletion.
+- [ ] Create, edit, and delete exposures with every optional field. The suggested frame advances from the maximum but remains editable, and duplicate frames round-trip.
+- [ ] Exposure UTC values display and edit as the device's local date/time, then survive a save/reload without shifting.
+- [ ] “获取当前位置” prompts only from the exposure form. Precise and approximate grants fill an editable readable address when geocoding succeeds.
+- [ ] Permission denial/permanent denial, disabled location services, timeout, and geocoder failure keep existing text, show a manual-entry hint, never expose coordinates, and never block saving.
+
 ## Hermes and administration
 
 - [ ] Conversation create/open/delete and incremental SSE responses work without duplicated messages.
@@ -37,5 +49,5 @@ Run this checklist against a disposable account on both API 26 and the current t
 ## Packaging and regression
 
 - [ ] Install `app/build/outputs/apk/debug/app-debug.apk` on API 26 and target API devices and complete a navigation smoke test.
-- [x] `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass with JDK 21 and Android SDK Platform 36 (20 JVM tests).
+- [x] `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass with JDK 18 and Android SDK Platform 36 (22 JVM tests).
 - [x] Repository-root `npm test` passes; no Android implementation change touched the existing browser/backend contract.
