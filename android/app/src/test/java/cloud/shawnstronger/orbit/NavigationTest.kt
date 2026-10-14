@@ -35,6 +35,10 @@ class NavigationTest {
         )
         assertFalse(OrbitRoute.Admin in normal)
 
+        val libraryReader = visibleMoreRoutes(user("library:read"))
+        assertEquals(listOf(OrbitRoute.Library), libraryReader)
+        assertFalse(OrbitRoute.Library in visibleMoreRoutes(user("library:upload")))
+
         val admin = visibleMoreRoutes(user("content:read", "users:manage", "agents:manage"))
         assertTrue(OrbitRoute.Admin in admin)
         assertTrue(OrbitRoute.Hermes in admin)

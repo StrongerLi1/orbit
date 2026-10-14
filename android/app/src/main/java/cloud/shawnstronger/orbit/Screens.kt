@@ -260,6 +260,7 @@ fun MoreScreen(state: OrbitState, onRoute: (OrbitRoute) -> Unit, onLogout: () ->
     val tools = routes.filter { it != OrbitRoute.Admin && it != OrbitRoute.Hermes }
     val management = routes.filter { it == OrbitRoute.Admin || it == OrbitRoute.Hermes }
     val subtitles = mapOf(
+        OrbitRoute.Library to "共享电子书、阅读记录、书评与下载",
         OrbitRoute.Writings to "写下日记、短句或想留住的念头",
         OrbitRoute.FilmDiary to "记录胶卷与每一次按下快门",
         OrbitRoute.Excerpts to "收藏与整理值得重读的内容",

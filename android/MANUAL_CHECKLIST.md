@@ -14,7 +14,7 @@ Run this checklist against a disposable account on both API 26 and the current t
 
 - [ ] Light and dark system themes switch without unreadable text, hard-coded white surfaces, or invisible controls.
 - [ ] The bottom navigation exposes Home, Bookmarks, Plans, Todos, and More; secondary pages return to More with both the toolbar and system back actions.
-- [ ] More shows Writings, Film Diary, Excerpts, Netdisk, Hermes, account details, and logout; admin-only destinations remain permission-filtered.
+- [ ] More shows Writings, Film Diary, Shared Library, Excerpts, Netdisk, Hermes, account details, and logout; permission-gated destinations remain filtered.
 - [ ] Common narrow-phone layouts and 1.3x system font size keep primary actions reachable without horizontal clipping.
 - [ ] Loading, partial-content error, empty, busy, disabled, destructive, banned, interrupted, and generating states use text or icons as well as color.
 
@@ -39,6 +39,19 @@ Run this checklist against a disposable account on both API 26 and the current t
 - [ ] “获取当前位置” prompts only from the exposure form. Precise and approximate grants fill an editable readable address when geocoding succeeds.
 - [ ] Permission denial/permanent denial, disabled location services, timeout, and geocoder failure keep existing text, show a manual-entry hint, never expose coordinates, and never block saving.
 
+## Shared library
+
+- [ ] A user with `library:read` sees Shared Library in More; other users do not trigger a library request or see the destination.
+- [ ] Catalog search and All/Unread/Read filters match the browser client, including loading, empty, no-result, retry, cover, and missing-cover states.
+- [ ] A user with `library:upload` can select EPUB, PDF, MOBI, AZW3, or TXT from the system picker, optionally select a cover, review filename-derived title/author, manually correct either field, and confirm untouched fields prefer embedded metadata while manual values win.
+- [ ] Unsupported uploads stay in the form with a readable error. A token refresh during multipart upload reopens both document streams and completes without loading the whole book into memory.
+- [ ] A user with `library:manage` can edit title/author, replace or remove a cover, and delete a book only after the cascade warning; other users see none of those actions.
+- [ ] Create a read with an optional named or anonymous review, then edit/delete only the current user's read. Reader totals and the grouped reader list refresh after every mutation.
+- [ ] Create, toggle anonymity, and delete a review according to the server-projected ownership controls; another account cannot see owner-only actions.
+- [ ] Download every supported format through Android's Save As picker. The chosen filename/MIME are sensible, cancellation is harmless, and no private duplicate remains in app storage.
+- [ ] Create a public share link, copy it, and send it through the Android share sheet. An administrator can regenerate or revoke it only after confirmation, and an old/revoked URL stops downloading.
+- [ ] Library-only 403, offline, cover, upload, download, and detail failures remain isolated from Home and the other content sections.
+
 ## Hermes and administration
 
 - [ ] Conversation create/open/delete and incremental SSE responses work without duplicated messages.
@@ -49,5 +62,6 @@ Run this checklist against a disposable account on both API 26 and the current t
 ## Packaging and regression
 
 - [ ] Install `app/build/outputs/apk/debug/app-debug.apk` on API 26 and target API devices and complete a navigation smoke test.
-- [x] `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass with JDK 18 and Android SDK Platform 36 (22 JVM tests).
+- [ ] Reinstall the previous debug APK and confirm rollback requires no server migration or cleanup.
+- [x] `testDebugUnitTest`, `lintDebug`, and `assembleDebug` pass with JDK 18 and Android SDK Platform 36 (27 JVM tests).
 - [x] Repository-root `npm test` passes; no Android implementation change touched the existing browser/backend contract.

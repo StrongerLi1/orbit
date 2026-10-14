@@ -285,6 +285,55 @@ object OrbitJson {
         updatedAt = obj.text("updatedAt"),
     )
 
+    fun libraryBooks(raw: String) = JSONArray(raw).objects(::libraryBook)
+    fun libraryBook(obj: JSONObject) = LibraryBook(
+        id = obj.text("id"),
+        title = obj.text("title"),
+        author = obj.text("author"),
+        fileFormat = obj.text("fileFormat"),
+        originalFilename = obj.text("originalFilename"),
+        fileSize = obj.optLong("fileSize"),
+        hasCover = obj.optBoolean("hasCover"),
+        uploadedByName = obj.text("uploadedByName"),
+        readerCount = obj.optInt("readerCount"),
+        readCount = obj.optInt("readCount"),
+        currentUserReadCount = obj.optInt("currentUserReadCount"),
+        currentUserRead = obj.optBoolean("currentUserRead"),
+        createdAt = obj.text("createdAt"),
+        updatedAt = obj.text("updatedAt"),
+    )
+
+    fun libraryReaders(raw: String): LibraryReaders {
+        val obj = JSONObject(raw)
+        return LibraryReaders(
+            readerCount = obj.optInt("readerCount"),
+            readCount = obj.optInt("readCount"),
+            readers = obj.optJSONArray("readers").objects { reader ->
+                LibraryReader(
+                    username = reader.text("username"),
+                    isCurrentUser = reader.optBoolean("isCurrentUser"),
+                    reads = reader.optJSONArray("reads").objects { read ->
+                        LibraryRead(read.text("id"), read.text("readDate"), read.text("createdAt"), read.text("updatedAt"))
+                    },
+                )
+            },
+        )
+    }
+
+    fun libraryReviews(raw: String) = JSONArray(raw).objects { obj ->
+        LibraryReview(
+            id = obj.text("id"),
+            username = obj.text("username"),
+            content = obj.text("content"),
+            createdAt = obj.text("createdAt"),
+            isAnonymous = obj.optBoolean("isAnonymous"),
+            canDelete = obj.optBoolean("canDelete"),
+            canToggleAnonymous = obj.optBoolean("canToggleAnonymous"),
+        )
+    }
+
+    fun libraryShare(raw: String) = JSONObject(raw).text("sharePath")
+
     fun netdisk(raw: String): NetdiskSearch {
         val obj = JSONObject(raw)
         val results = obj.optJSONArray("results").objects { item ->

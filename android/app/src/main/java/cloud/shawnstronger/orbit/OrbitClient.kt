@@ -6,11 +6,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 import java.net.HttpCookie
 import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 class OrbitHttpException(val status: Int, message: String) : Exception(message)
 
@@ -53,6 +56,105 @@ class OrbitClient(context: Context) {
     suspend fun excerpts() = OrbitJson.excerpts(request("GET", "/api/excerpts"))
     suspend fun writings() = OrbitJson.writings(request("GET", "/api/writings"))
     suspend fun filmRolls() = OrbitJson.filmRolls(request("GET", "/api/film-rolls"))
+
+    suspend fun libraryBooks(query: String = ""): List<LibraryBook> {
+        val value = query.trim()
+        val path = if (value.isBlank()) "/api/library/books" else "/api/library/books?q=${URLEncoder.encode(value, StandardCharsets.UTF_8.name())}"
+        return OrbitJson.libraryBooks(request("GET", path))
+    }
+
+    suspend fun libraryReaders(bookId: String) =
+        OrbitJson.libraryReaders(request("GET", "/api/library/books/$bookId/reads"))
+
+    suspend fun libraryReviews(bookId: String) =
+        OrbitJson.libraryReviews(request("GET", "/api/library/books/$bookId/reviews"))
+
+    suspend fun createLibraryRead(bookId: String, readDate: String, review: String, anonymous: Boolean) {
+        request(
+            "POST",
+            "/api/library/books/$bookId/reads",
+            JSONObject().put("readDate", readDate).put("review", review).put("reviewAnonymous", anonymous),
+        )
+    }
+
+    suspend fun updateLibraryRead(bookId: String, readId: String, readDate: String) {
+        request("PATCH", "/api/library/books/$bookId/reads/$readId", JSONObject().put("readDate", readDate))
+    }
+
+    suspend fun deleteLibraryRead(bookId: String, readId: String) {
+        request("DELETE", "/api/library/books/$bookId/reads/$readId")
+    }
+
+    suspend fun createLibraryReview(bookId: String, content: String, anonymous: Boolean) {
+        request("POST", "/api/library/books/$bookId/reviews", JSONObject().put("content", content).put("anonymous", anonymous))
+    }
+
+    suspend fun toggleLibraryReview(bookId: String, reviewId: String, anonymous: Boolean) {
+        request("PATCH", "/api/library/books/$bookId/reviews/$reviewId", JSONObject().put("anonymous", anonymous))
+    }
+
+    suspend fun deleteLibraryReview(bookId: String, reviewId: String) {
+        request("DELETE", "/api/library/books/$bookId/reviews/$reviewId")
+    }
+
+    suspend fun libraryShare(bookId: String, regenerate: Boolean = false): String {
+        val suffix = if (regenerate) "/regenerate" else ""
+        return OrbitJson.libraryShare(request("POST", "/api/library/books/$bookId/share$suffix", JSONObject()))
+    }
+
+    suspend fun revokeLibraryShare(bookId: String) {
+        request("DELETE", "/api/library/books/$bookId/share")
+    }
+
+    suspend fun deleteLibraryBook(bookId: String) {
+        request("DELETE", "/api/library/books/$bookId")
+    }
+
+    suspend fun uploadLibraryBook(
+        title: String,
+        author: String,
+        book: LibraryUploadFile,
+        cover: LibraryUploadFile?,
+    ) {
+        val fields = linkedMapOf("title" to title, "author" to author)
+        val files = linkedMapOf("bookFile" to book).apply { if (cover != null) put("coverFile", cover) }
+        multipart("POST", "/api/library/books", fields, files)
+    }
+
+    suspend fun updateLibraryBook(
+        bookId: String,
+        title: String,
+        author: String,
+        removeCover: Boolean,
+        cover: LibraryUploadFile?,
+    ) {
+        val fields = linkedMapOf("title" to title, "author" to author, "removeCover" to removeCover.toString())
+        val files = linkedMapOf<String, LibraryUploadFile>().apply { if (cover != null) put("coverFile", cover) }
+        multipart("PATCH", "/api/library/books/$bookId", fields, files)
+    }
+
+    suspend fun libraryCover(bookId: String): ByteArray = authenticated("/api/library/books/$bookId/cover") {
+        val output = ByteArrayOutputStream()
+        executeStream("/api/library/books/$bookId/cover") { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            var total = 0
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                total += count
+                if (total > MAX_COVER_BYTES) throw OrbitHttpException(502, "封面文件过大")
+                output.write(buffer, 0, count)
+            }
+        }
+        output.toByteArray()
+    }
+
+    suspend fun downloadLibraryBook(bookId: String, openOutput: () -> OutputStream) =
+        authenticated("/api/library/books/$bookId/download") {
+            executeStream("/api/library/books/$bookId/download") { input ->
+                openOutput().buffered().use { output -> input.copyTo(output, DEFAULT_BUFFER_SIZE) }
+            }
+        }
 
     suspend fun create(collection: String, payload: JSONObject) = request("POST", "/api/$collection", payload)
     suspend fun patch(collection: String, id: String, payload: JSONObject) = request("PATCH", "/api/$collection/$id", payload)
@@ -164,16 +266,29 @@ class OrbitClient(context: Context) {
         path: String,
         body: JSONObject? = null,
         retry: Boolean = true,
-    ): String = withContext(Dispatchers.IO) {
+    ): String = authenticated(path, retry) { execute(method, path, body?.toString()) }
+
+    private suspend fun <T> authenticated(
+        path: String,
+        retry: Boolean = true,
+        operation: () -> T,
+    ): T = withContext(Dispatchers.IO) {
         val revision = cookieRevision
         try {
-            execute(method, path, body?.toString())
+            operation()
         } catch (error: OrbitHttpException) {
             if (error.status != 401 || !retry || path in NON_REFRESHABLE_AUTH_PATHS) throw error
             refreshIfNeeded(revision)
-            execute(method, path, body?.toString())
+            operation()
         }
     }
+
+    private suspend fun multipart(
+        method: String,
+        path: String,
+        fields: Map<String, String>,
+        files: Map<String, LibraryUploadFile>,
+    ): String = authenticated(path) { executeMultipart(method, path, fields, files) }
 
     private fun refreshIfNeeded(failedAtRevision: Int) = synchronized(refreshLock) {
         if (cookieRevision != failedAtRevision) return@synchronized
@@ -199,13 +314,57 @@ class OrbitClient(context: Context) {
         }
     }
 
-    private fun open(path: String, method: String, body: String?, accept: String = "application/json"): HttpURLConnection {
+    private fun executeStream(path: String, consume: (java.io.InputStream) -> Unit) {
+        val connection = open(path, "GET", null, accept = "*/*")
+        try {
+            val status = connection.responseCode
+            captureCookies(connection)
+            if (status !in 200..299) throw httpError(connection, status)
+            connection.inputStream.buffered().use(consume)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun executeMultipart(
+        method: String,
+        path: String,
+        fields: Map<String, String>,
+        files: Map<String, LibraryUploadFile>,
+    ): String {
+        val boundary = "Orbit-${UUID.randomUUID()}"
+        val connection = open(path, method, null, contentType = "multipart/form-data; boundary=$boundary")
+        connection.doOutput = true
+        connection.readTimeout = FILE_TIMEOUT_MS
+        connection.setChunkedStreamingMode(64 * 1024)
+        try {
+            connection.outputStream.buffered().use { output ->
+                writeLibraryMultipart(output, boundary, fields, files)
+            }
+            val status = connection.responseCode
+            captureCookies(connection)
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            if (status !in 200..299) throw errorFrom(status, text)
+            return text
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun open(
+        path: String,
+        method: String,
+        body: String?,
+        accept: String = "application/json",
+        contentType: String = "application/json",
+    ): HttpURLConnection {
         val connection = URL(origin + path).openConnection() as HttpURLConnection
         connection.requestMethod = method
         connection.connectTimeout = 15_000
         connection.readTimeout = if (accept == "text/event-stream") 0 else 45_000
         connection.setRequestProperty("Accept", accept)
-        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("Content-Type", contentType)
         cookieHeader().takeIf(String::isNotBlank)?.let { connection.setRequestProperty("Cookie", it) }
         if (body != null) {
             connection.doOutput = true
@@ -251,7 +410,9 @@ class OrbitClient(context: Context) {
     }
 
     private fun errorFrom(status: Int, text: String): OrbitHttpException {
-        val message = runCatching { JSONObject(text).optString("error") }.getOrNull().orEmpty()
+        val message = runCatching {
+            JSONObject(text).let { it.optString("error").ifBlank { it.optString("detail") } }
+        }.getOrNull().orEmpty()
         return OrbitHttpException(status, message.ifBlank { "请求失败：HTTP $status" })
     }
 
@@ -259,6 +420,8 @@ class OrbitClient(context: Context) {
         const val SERVER_OVERRIDE = "server_override"
         const val COOKIES = "cookies"
         const val COOKIE_ORIGIN = "cookie_origin"
+        const val FILE_TIMEOUT_MS = 180_000
+        const val MAX_COVER_BYTES = 6 * 1024 * 1024
         val NON_REFRESHABLE_AUTH_PATHS = setOf(
             "/api/auth/playcaptcha",
             "/api/auth/register",

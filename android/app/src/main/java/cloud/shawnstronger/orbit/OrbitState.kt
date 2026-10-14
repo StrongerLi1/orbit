@@ -17,6 +17,7 @@ import org.json.JSONObject
 class OrbitState(val client: OrbitClient) {
     private val stateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var hermesJob: Job? = null
+    private val latestLibraryRequest = LatestLibraryRequest()
 
     var bootstrapping by mutableStateOf(true)
     var busy by mutableStateOf(false)
@@ -32,6 +33,15 @@ class OrbitState(val client: OrbitClient) {
     var excerpts by mutableStateOf(emptyList<Excerpt>())
     var writings by mutableStateOf(emptyList<WritingPost>())
     var filmRolls by mutableStateOf(emptyList<FilmRoll>())
+
+    var libraryBooks by mutableStateOf(emptyList<LibraryBook>())
+    var libraryQuery by mutableStateOf("")
+    var libraryLoading by mutableStateOf(false)
+    var libraryError by mutableStateOf<String?>(null)
+    var activeLibraryBookId by mutableStateOf<String?>(null)
+    var libraryReaders by mutableStateOf<LibraryReaders?>(null)
+    var libraryReviews by mutableStateOf<List<LibraryReview>?>(null)
+    var librarySharePath by mutableStateOf("")
 
     var netdisk by mutableStateOf<NetdiskSearch?>(null)
     var conversations by mutableStateOf(emptyList<HermesConversation>())
@@ -182,6 +192,126 @@ class OrbitState(val client: OrbitClient) {
 
     suspend fun deleteFilmExposure(item: FilmExposure) = mutate {
         client.deleteFilmExposure(item.rollId, item.id)
+    }
+
+    suspend fun loadLibrary(query: String = libraryQuery): Boolean {
+        val generation = latestLibraryRequest.next()
+        libraryQuery = query
+        libraryLoading = true
+        libraryError = null
+        return try {
+            val result = client.libraryBooks(query)
+            if (latestLibraryRequest.accepts(generation)) libraryBooks = result
+            true
+        } catch (failure: Exception) {
+            if (failure is OrbitHttpException && failure.status == 401) resetSession()
+            else if (latestLibraryRequest.accepts(generation)) libraryError = readable(failure)
+            false
+        } finally {
+            if (latestLibraryRequest.accepts(generation)) libraryLoading = false
+        }
+    }
+
+    suspend fun libraryCover(bookId: String): ByteArray? = try {
+        client.libraryCover(bookId)
+    } catch (failure: OrbitHttpException) {
+        if (failure.status == 401) resetSession()
+        null
+    } catch (_: Exception) {
+        null
+    }
+
+    suspend fun uploadLibraryBook(title: String, author: String, book: LibraryUploadFile, cover: LibraryUploadFile?) =
+        libraryMutation(mutate = { client.uploadLibraryBook(title, author, book, cover) })
+
+    suspend fun updateLibraryBook(
+        bookId: String,
+        title: String,
+        author: String,
+        removeCover: Boolean,
+        cover: LibraryUploadFile?,
+    ) = libraryMutation(mutate = { client.updateLibraryBook(bookId, title, author, removeCover, cover) })
+
+    suspend fun deleteLibraryBook(bookId: String) = libraryMutation(mutate = {
+        client.deleteLibraryBook(bookId)
+        if (activeLibraryBookId == bookId) clearLibraryDetail()
+    })
+
+    suspend fun loadLibraryReaders(bookId: String): Boolean = guarded {
+        activeLibraryBookId = bookId
+        libraryReaders = null
+        libraryReaders = client.libraryReaders(bookId)
+    }
+
+    suspend fun createLibraryRead(bookId: String, readDate: String, review: String, anonymous: Boolean): Boolean = libraryMutation(
+        mutate = { client.createLibraryRead(bookId, readDate, review, anonymous) },
+        refresh = {
+            refreshLibraryOrThrow()
+            libraryReaders = client.libraryReaders(bookId)
+            if (review.isNotBlank()) libraryReviews = client.libraryReviews(bookId)
+        },
+    )
+
+    suspend fun updateLibraryRead(bookId: String, readId: String, readDate: String): Boolean = libraryMutation(
+        mutate = { client.updateLibraryRead(bookId, readId, readDate) },
+        refresh = { refreshLibraryOrThrow(); libraryReaders = client.libraryReaders(bookId) },
+    )
+
+    suspend fun deleteLibraryRead(bookId: String, readId: String): Boolean = libraryMutation(
+        mutate = { client.deleteLibraryRead(bookId, readId) },
+        refresh = { refreshLibraryOrThrow(); libraryReaders = client.libraryReaders(bookId) },
+    )
+
+    suspend fun loadLibraryReviews(bookId: String): Boolean = guarded {
+        activeLibraryBookId = bookId
+        libraryReviews = null
+        libraryReviews = client.libraryReviews(bookId)
+    }
+
+    suspend fun createLibraryReview(bookId: String, content: String, anonymous: Boolean): Boolean = libraryMutation(
+        mutate = {
+            require(content.isNotBlank() && content.length <= 3000) { "书评需要 1-3000 个字符" }
+            client.createLibraryReview(bookId, content, anonymous)
+        },
+        refresh = { libraryReviews = client.libraryReviews(bookId) },
+    )
+
+    suspend fun toggleLibraryReview(bookId: String, review: LibraryReview): Boolean = libraryMutation(
+        mutate = {
+            require(review.canToggleAnonymous) { "不能修改这条书评" }
+            client.toggleLibraryReview(bookId, review.id, !review.isAnonymous)
+        },
+        refresh = { libraryReviews = client.libraryReviews(bookId) },
+    )
+
+    suspend fun deleteLibraryReview(bookId: String, review: LibraryReview): Boolean = libraryMutation(
+        mutate = {
+            require(review.canDelete) { "不能删除这条书评" }
+            client.deleteLibraryReview(bookId, review.id)
+        },
+        refresh = { libraryReviews = client.libraryReviews(bookId) },
+    )
+
+    suspend fun loadLibraryShare(bookId: String, regenerate: Boolean = false): Boolean = guarded {
+        activeLibraryBookId = bookId
+        if (!regenerate) librarySharePath = ""
+        librarySharePath = client.libraryShare(bookId, regenerate)
+    }
+
+    suspend fun revokeLibraryShare(bookId: String): Boolean = guarded {
+        client.revokeLibraryShare(bookId)
+        librarySharePath = ""
+    }
+
+    suspend fun downloadLibraryBook(bookId: String, openOutput: () -> java.io.OutputStream): Boolean = guarded {
+        client.downloadLibraryBook(bookId, openOutput)
+    }
+
+    fun clearLibraryDetail() {
+        activeLibraryBookId = null
+        libraryReaders = null
+        libraryReviews = null
+        librarySharePath = ""
     }
 
     suspend fun addTodo(title: String, priority: String, dueDate: String) = mutate {
@@ -410,6 +540,35 @@ class OrbitState(val client: OrbitClient) {
         loadContentOrThrow()
     }
 
+    private suspend fun libraryMutation(
+        mutate: suspend () -> Unit,
+        refresh: suspend () -> Unit = { refreshLibraryOrThrow() },
+    ): Boolean {
+        busy = true
+        error = null
+        return try {
+            mutate()
+            try {
+                refresh()
+            } catch (failure: Exception) {
+                if (failure is OrbitHttpException && failure.status == 401) resetSession()
+                else error = "操作已完成，但刷新失败：${readable(failure)}"
+            }
+            true
+        } catch (failure: Exception) {
+            if (failure is OrbitHttpException && failure.status == 401) resetSession()
+            error = readable(failure)
+            false
+        } finally {
+            busy = false
+        }
+    }
+
+    private suspend fun refreshLibraryOrThrow() {
+        libraryBooks = client.libraryBooks(libraryQuery)
+        libraryError = null
+    }
+
     private suspend fun loadContentOrThrow() {
         val failures = loadContentSections(
             listOf(
@@ -458,6 +617,12 @@ class OrbitState(val client: OrbitClient) {
         excerpts = emptyList()
         writings = emptyList()
         filmRolls = emptyList()
+        latestLibraryRequest.invalidate()
+        libraryBooks = emptyList()
+        libraryQuery = ""
+        libraryLoading = false
+        libraryError = null
+        clearLibraryDetail()
         conversations = emptyList()
         activeConversation = null
         finishHermesState()
