@@ -88,6 +88,7 @@ fun LibraryScreen(state: OrbitState) {
     var deletingReview by remember { mutableStateOf<Pair<LibraryBook, LibraryReview>?>(null) }
     var shareAction by remember { mutableStateOf<String?>(null) }
     var pendingDownload by remember { mutableStateOf<LibraryBook?>(null) }
+    var kindleSettingsOpen by remember { mutableStateOf(false) }
 
     val downloadLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val book = pendingDownload
@@ -122,7 +123,12 @@ fun LibraryScreen(state: OrbitState) {
     ) {
         item {
             SectionTitle("共享图书馆", "${visible.size} / ${state.libraryBooks.size} 本") {
-                if (user.can("library:upload")) Button(onClick = { editingBook = null; bookFormOpen = true }) { Text("上传") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        scope.launch { if (state.loadKindleSettings() != null) kindleSettingsOpen = true }
+                    }) { Text("Kindle") }
+                    if (user.can("library:upload")) Button(onClick = { editingBook = null; bookFormOpen = true }) { Text("上传") }
+                }
             }
         }
         item {
@@ -155,6 +161,12 @@ fun LibraryScreen(state: OrbitState) {
                     TextButton(onClick = { scope.launch { state.loadLibrary(query) } }) { Text("重试") }
                 }
             }
+        }
+        state.kindleError?.let { message ->
+            item { OrbitPanel(tonal = true) { Text(message, color = MaterialTheme.colorScheme.error) } }
+        }
+        if (state.kindleNotice.isNotBlank()) {
+            item { OrbitPanel(tonal = true) { Text(state.kindleNotice, color = MaterialTheme.colorScheme.primary) } }
         }
         if (state.libraryLoading && state.libraryBooks.isEmpty()) {
             item { Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
@@ -196,6 +208,14 @@ fun LibraryScreen(state: OrbitState) {
                         shareBook = book
                         scope.launch { state.loadLibraryShare(book.id) }
                     },
+                    onKindle = {
+                        scope.launch {
+                            val settings = state.kindleSettings ?: state.loadKindleSettings()
+                            if (settings == null) return@launch
+                            if (settings.kindleEmail.isBlank()) kindleSettingsOpen = true
+                            else state.sendLibraryBookToKindle(book.id)
+                        }
+                    },
                     onEdit = { editingBook = book; bookFormOpen = true },
                     onDelete = { deletingBook = book },
                 )
@@ -213,6 +233,21 @@ fun LibraryScreen(state: OrbitState) {
                         state.updateLibraryBook(it.id, title, author, removeCover, coverFile)
                     } ?: state.uploadLibraryBook(title, author, requireNotNull(bookFile), coverFile)
                     if (success) { bookFormOpen = false; editingBook = null }
+                }
+            },
+        )
+    }
+
+    if (kindleSettingsOpen && state.kindleSettings != null) {
+        KindleSettingsDialog(
+            settings = requireNotNull(state.kindleSettings),
+            onDismiss = { kindleSettingsOpen = false },
+            onSave = { email -> scope.launch { if (state.saveKindleEmail(email)) kindleSettingsOpen = false } },
+            onClear = {
+                scope.launch {
+                    if (state.clearKindleEmail()) {
+                        kindleSettingsOpen = false
+                    }
                 }
             },
         )
@@ -322,6 +357,7 @@ private fun LibraryBookCard(
     onReviews: () -> Unit,
     onDownload: () -> Unit,
     onShare: () -> Unit,
+    onKindle: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -357,12 +393,47 @@ private fun LibraryBookCard(
             TextButton(onClick = onReviews) { Icon(Icons.Outlined.RateReview, null); Text("书评") }
             TextButton(onClick = onDownload) { Icon(Icons.Outlined.Download, null); Text("下载") }
             TextButton(onClick = onShare) { Icon(Icons.Outlined.IosShare, null); Text("分享") }
+            if (book.canSendToKindle) {
+                TextButton(onClick = onKindle, enabled = state.kindleSendingBookId == null) {
+                    Text(if (state.kindleSendingBookId == book.id) "发送中…" else "发到 Kindle")
+                }
+            }
         }
         if (canManage) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onEdit) { Icon(Icons.Outlined.Edit, null); Text("编辑") }
                 TextButton(onClick = onDelete) { Text("删除", color = MaterialTheme.colorScheme.error) }
             }
+        }
+    }
+}
+
+@Composable
+private fun KindleSettingsDialog(
+    settings: KindleSettings,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onClear: () -> Unit,
+) {
+    var email by remember(settings.kindleEmail) { mutableStateOf(settings.kindleEmail) }
+    val valid = Regex("^[^@\\s]+@kindle\\.com$", RegexOption.IGNORE_CASE).matches(email.trim())
+    FormDialog("Kindle 邮箱设置", onDismiss, valid, { onSave(email.trim()) }) {
+        OutlinedTextField(
+            email,
+            { email = it.take(320) },
+            label = { Text("你的 Kindle 邮箱") },
+            placeholder = { Text("name@kindle.com") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            if (settings.enabled) "请先把 ${settings.senderEmail} 加入 Amazon 的已认可发件人列表。支持 EPUB、PDF、TXT，附件上限 ${settings.maxAttachmentMb} MB。"
+            else "服务器尚未配置邮件发送服务。你可以先保存邮箱，再联系管理员配置 SMTP。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (settings.kindleEmail.isNotBlank()) {
+            TextButton(onClick = onClear) { Text("清除 Kindle 邮箱", color = MaterialTheme.colorScheme.error) }
         }
     }
 }

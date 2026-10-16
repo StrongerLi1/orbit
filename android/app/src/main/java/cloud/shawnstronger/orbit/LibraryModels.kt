@@ -18,8 +18,16 @@ data class LibraryBook(
     val readCount: Int,
     val currentUserReadCount: Int,
     val currentUserRead: Boolean,
+    val canSendToKindle: Boolean,
     val createdAt: String,
     val updatedAt: String,
+)
+
+data class KindleSettings(
+    val kindleEmail: String,
+    val senderEmail: String,
+    val enabled: Boolean,
+    val maxAttachmentMb: Int,
 )
 
 data class LibraryRead(val id: String, val readDate: String, val createdAt: String, val updatedAt: String)

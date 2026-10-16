@@ -2,7 +2,7 @@ const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getM
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
 const localDateTimeValue = (value = '') => { const date = value ? new Date(value) : new Date(); const offset = date.getTimezoneOffset() * 60_000; return new Date(date.getTime() - offset).toISOString().slice(0, 16); };
 const formatLocalDateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).format(new Date(value)) : '';
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], writings: [], filmRolls: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', shareBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], writings: [], filmRolls: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', shareBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '', kindleSettings: null, sendingBookId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
 let authReturnTarget = new URLSearchParams(location.search).get('next') === 'music' ? 'music' : '';
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -57,7 +57,11 @@ async function request(url, options = {}, retry = true) {
     if (refreshed) return request(url, options, false);
   }
   if (response.status === 401) showAuth('login');
-  if (!response.ok) throw new Error(result.error || '操作失败');
+  if (!response.ok) {
+    const error = new Error(result.detail || result.error || '操作失败');
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 
@@ -256,6 +260,7 @@ function libraryBookHtml(book) {
   const initial = (book.title || '书').trim().slice(0, 1);
   const cover = book.hasCover ? `<img src="/api/library/books/${escapeHtml(book.id)}/cover" alt="${escapeHtml(book.title)} 封面" loading="lazy" onerror="this.remove()">` : '';
   const manage = canManageLibrary() ? `<button data-library-edit="${escapeHtml(book.id)}">编辑</button><button class="library-danger" data-library-delete="${escapeHtml(book.id)}">删除</button>` : '';
+  const kindle = book.canSendToKindle ? `<button data-kindle-send="${escapeHtml(book.id)}" ${state.library.sendingBookId === book.id ? 'disabled' : ''}>${state.library.sendingBookId === book.id ? '发送中…' : '发送到 Kindle'}</button>` : '';
   return `<article class="library-card">
     <div class="library-cover" style="--cover-hue:${libraryHue(book.title)}">${cover}<span class="library-cover-placeholder">${escapeHtml(initial)}</span><span class="library-format">${escapeHtml(String(book.fileFormat || '').toUpperCase())}</span></div>
     <div class="library-card-body">
@@ -269,6 +274,7 @@ function libraryBookHtml(book) {
         <button data-library-reviews="${escapeHtml(book.id)}">书评</button>
         <a href="/api/library/books/${escapeHtml(book.id)}/download">下载</a>
         <button data-library-share="${escapeHtml(book.id)}">分享</button>
+        ${kindle}
         ${manage}
       </div>
     </div>
@@ -307,6 +313,43 @@ async function loadLibrary() {
       state.library.loading = false;
       renderLibrary();
     }
+  }
+}
+
+async function loadKindleSettings() {
+  state.library.kindleSettings = await request('/api/account/kindle');
+  return state.library.kindleSettings;
+}
+
+async function openKindleSettings() {
+  try {
+    const settings = await loadKindleSettings();
+    const form = $('#kindle-settings-form');
+    form.elements.email.value = settings.kindleEmail || '';
+    $('[data-kindle-clear]', form).hidden = !settings.kindleEmail;
+    $('#kindle-settings-hint').textContent = settings.enabled
+      ? `请先把 ${settings.senderEmail} 加入 Amazon 的“已认可的发件人电子邮箱列表”。支持 EPUB、PDF、TXT，单个附件上限 ${settings.maxAttachmentMb} MB。`
+      : '服务器尚未配置邮件发送服务，保存邮箱后仍需管理员完成 SMTP 配置。';
+    $('#kindle-settings-modal').hidden = false;
+    setTimeout(() => form.elements.email.focus(), 50);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function sendBookToKindle(bookId) {
+  if (state.library.sendingBookId) return;
+  state.library.sendingBookId = bookId;
+  renderLibrary();
+  try {
+    await request(`/api/library/books/${bookId}/send-to-kindle`, { method:'POST' });
+    toast('邮件已发送，请稍后在 Kindle 中查看');
+  } catch (error) {
+    if (error.status === 409) await openKindleSettings();
+    else toast(error.message);
+  } finally {
+    state.library.sendingBookId = '';
+    renderLibrary();
   }
 }
 
@@ -466,6 +509,7 @@ function closeLibraryModals() {
   $('#library-readers-modal').hidden = true;
   $('#library-review-modal').hidden = true;
   $('#library-share-modal').hidden = true;
+  $('#kindle-settings-modal').hidden = true;
   state.library.readers = null;
   state.library.reviews = null;
   state.library.reviewBookId = '';
@@ -1072,7 +1116,18 @@ document.addEventListener('click', async (event) => {
   const add = event.target.closest('[data-add]'); if (add) openModal(add.dataset.add);
   if (event.target.closest('#modal .close') || event.target === $('#modal')) closeModal();
   if (event.target.closest('#auth-captcha-modal .close') || event.target === $('#auth-captcha-modal')) closeAuthCaptcha();
-  if (event.target.closest('[data-library-close]') || ['library-book-modal','library-read-modal','library-readers-modal','library-review-modal','library-share-modal'].includes(event.target.id)) closeLibraryModals();
+  if (event.target.closest('[data-library-close]') || ['library-book-modal','library-read-modal','library-readers-modal','library-review-modal','library-share-modal','kindle-settings-modal'].includes(event.target.id)) closeLibraryModals();
+  if (event.target.closest('[data-kindle-settings]')) { await openKindleSettings(); return; }
+  const kindleSend = event.target.closest('[data-kindle-send]');
+  if (kindleSend) { await sendBookToKindle(kindleSend.dataset.kindleSend); return; }
+  if (event.target.closest('[data-kindle-clear]')) {
+    try {
+      state.library.kindleSettings = await request('/api/account/kindle', { method:'DELETE' });
+      closeLibraryModals();
+      toast('Kindle 邮箱已清除');
+    } catch (error) { toast(error.message); }
+    return;
+  }
   if (event.target.closest('[data-library-upload]')) {
     if (!canUploadLibrary()) { toast('没有上传权限'); return; }
     $('#quick-menu').hidden = true;
@@ -1438,6 +1493,24 @@ $('#library-book-form').addEventListener('submit', async (event) => {
   } finally {
     button.disabled = false;
     button.textContent = '保存';
+  }
+});
+$('#kindle-settings-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('[type="submit"]');
+  button.disabled = true;
+  try {
+    state.library.kindleSettings = await request('/api/account/kindle', {
+      method:'PUT',
+      body:JSON.stringify({ email:form.elements.email.value.trim() }),
+    });
+    closeLibraryModals();
+    toast('Kindle 邮箱已保存');
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    button.disabled = false;
   }
 });
 $('#library-read-form').addEventListener('submit', async (event) => {

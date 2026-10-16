@@ -14,8 +14,8 @@ android {
         applicationId = "cloud.shawnstronger.orbit"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "1.3.0-debug"
+        versionCode = 7
+        versionName = "1.4.0-debug"
         buildConfigField("String", "DEFAULT_SERVER", "\"https://shawnstronger.cloud\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

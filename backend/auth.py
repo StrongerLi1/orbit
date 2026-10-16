@@ -117,6 +117,12 @@ def get_user_by_id(user_id: str) -> dict[str, Any] | None:
             return cursor.fetchone()
 
 
+def set_user_kindle_email(user_id: str, email: str) -> None:
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE users SET kindle_email = %s WHERE id = %s", (email, user_id))
+
+
 def user_access(row: dict[str, Any]) -> tuple[list[str], list[str]]:
     if isinstance(row.get("roles"), list) and isinstance(row.get("permissions"), list):
         return row["roles"], row["permissions"]

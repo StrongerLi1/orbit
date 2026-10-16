@@ -42,6 +42,10 @@ class OrbitState(val client: OrbitClient) {
     var libraryReaders by mutableStateOf<LibraryReaders?>(null)
     var libraryReviews by mutableStateOf<List<LibraryReview>?>(null)
     var librarySharePath by mutableStateOf("")
+    var kindleSettings by mutableStateOf<KindleSettings?>(null)
+    var kindleSendingBookId by mutableStateOf<String?>(null)
+    var kindleError by mutableStateOf<String?>(null)
+    var kindleNotice by mutableStateOf("")
 
     var netdisk by mutableStateOf<NetdiskSearch?>(null)
     var conversations by mutableStateOf(emptyList<HermesConversation>())
@@ -307,12 +311,59 @@ class OrbitState(val client: OrbitClient) {
         client.downloadLibraryBook(bookId, openOutput)
     }
 
+    suspend fun loadKindleSettings(): KindleSettings? = try {
+        kindleError = null
+        client.kindleSettings().also { kindleSettings = it }
+    } catch (failure: Exception) {
+        if (failure is OrbitHttpException && failure.status == 401) resetSession() else kindleError = readable(failure)
+        null
+    }
+
+    suspend fun saveKindleEmail(email: String): Boolean = kindleAction {
+        require(Regex("^[^@\\s]+@kindle\\.com$", RegexOption.IGNORE_CASE).matches(email.trim())) { "请输入有效的 @kindle.com 邮箱" }
+        kindleSettings = client.saveKindleEmail(email)
+        kindleNotice = "Kindle 邮箱已保存"
+    }
+
+    suspend fun clearKindleEmail(): Boolean = kindleAction {
+        kindleSettings = client.clearKindleEmail()
+        kindleNotice = "Kindle 邮箱已清除"
+    }
+
+    suspend fun sendLibraryBookToKindle(bookId: String): Boolean {
+        if (kindleSendingBookId != null) return false
+        kindleSendingBookId = bookId
+        kindleError = null
+        return try {
+            client.sendLibraryBookToKindle(bookId)
+            kindleNotice = "邮件已发送，请稍后在 Kindle 中查看"
+            true
+        } catch (failure: Exception) {
+            if (failure is OrbitHttpException && failure.status == 401) resetSession() else kindleError = readable(failure)
+            false
+        } finally {
+            kindleSendingBookId = null
+        }
+    }
+
     fun clearLibraryDetail() {
         activeLibraryBookId = null
         libraryReaders = null
         libraryReviews = null
         librarySharePath = ""
     }
+
+    private suspend fun kindleAction(action: suspend () -> Unit): Boolean {
+        kindleError = null
+        return try {
+            action()
+            true
+        } catch (failure: Exception) {
+            if (failure is OrbitHttpException && failure.status == 401) resetSession() else kindleError = readable(failure)
+            false
+        }
+    }
+
 
     suspend fun addTodo(title: String, priority: String, dueDate: String) = mutate {
         client.create("todos", JSONObject().put("title", title).put("priority", priority).put("dueDate", dueDate))
@@ -623,6 +674,10 @@ class OrbitState(val client: OrbitClient) {
         libraryLoading = false
         libraryError = null
         clearLibraryDetail()
+        kindleSettings = null
+        kindleSendingBookId = null
+        kindleError = null
+        kindleNotice = ""
         conversations = emptyList()
         activeConversation = null
         finishHermesState()

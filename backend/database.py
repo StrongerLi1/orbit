@@ -378,6 +378,7 @@ def initialize_database() -> None:
                     password_hash VARCHAR(255) NOT NULL,
                     is_admin TINYINT(1) NOT NULL DEFAULT 0,
                     is_banned TINYINT(1) NOT NULL DEFAULT 0,
+                    kindle_email VARCHAR(320) NOT NULL DEFAULT '',
                     created_at VARCHAR(40) NOT NULL,
                     last_login_at VARCHAR(40) NOT NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -393,6 +394,16 @@ def initialize_database() -> None:
             )
             if cursor.fetchone()["count"] == 0:
                 cursor.execute("ALTER TABLE users ADD COLUMN is_banned TINYINT(1) NOT NULL DEFAULT 0 AFTER is_admin")
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'users' AND COLUMN_NAME = 'kindle_email'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE users ADD COLUMN kindle_email VARCHAR(320) NOT NULL DEFAULT '' AFTER is_banned")
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS roles (

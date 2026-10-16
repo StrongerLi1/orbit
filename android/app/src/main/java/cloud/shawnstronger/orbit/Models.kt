@@ -299,9 +299,20 @@ object OrbitJson {
         readCount = obj.optInt("readCount"),
         currentUserReadCount = obj.optInt("currentUserReadCount"),
         currentUserRead = obj.optBoolean("currentUserRead"),
+        canSendToKindle = obj.optBoolean("canSendToKindle"),
         createdAt = obj.text("createdAt"),
         updatedAt = obj.text("updatedAt"),
     )
+
+    fun kindleSettings(raw: String): KindleSettings {
+        val obj = JSONObject(raw)
+        return KindleSettings(
+            kindleEmail = obj.text("kindleEmail"),
+            senderEmail = obj.text("senderEmail"),
+            enabled = obj.optBoolean("enabled"),
+            maxAttachmentMb = obj.optInt("maxAttachmentMb"),
+        )
+    }
 
     fun libraryReaders(raw: String): LibraryReaders {
         val obj = JSONObject(raw)

@@ -12,6 +12,20 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 class OrbitJsonTest {
+    @Test fun kindleSettingsAndCatalogCapabilityDecode() {
+        val settings = OrbitJson.kindleSettings(
+            """{"kindleEmail":"reader@kindle.com","senderEmail":"books@example.com","enabled":true,"maxAttachmentMb":25}""",
+        )
+        assertEquals("reader@kindle.com", settings.kindleEmail)
+        assertTrue(settings.enabled)
+        assertEquals(25, settings.maxAttachmentMb)
+
+        val book = OrbitJson.libraryBooks(
+            """[{"id":"b1","title":"书名","author":"作者","fileFormat":"epub","originalFilename":"book.epub","fileSize":12,"hasCover":false,"uploadedByName":"alice","readerCount":0,"readCount":0,"currentUserReadCount":0,"currentUserRead":false,"canSendToKindle":true,"createdAt":"c","updatedAt":"u"}]""",
+        ).single()
+        assertTrue(book.canSendToKindle)
+    }
+
     @Test fun permissionsComeFromServerPayload() {
         val user = OrbitJson.user(
             """{"id":"u","username":"reader","roles":["user"],"permissions":["content:read","hermes:chat"]}""",

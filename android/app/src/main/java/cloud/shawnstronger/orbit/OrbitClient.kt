@@ -63,6 +63,18 @@ class OrbitClient(context: Context) {
         return OrbitJson.libraryBooks(request("GET", path))
     }
 
+    suspend fun kindleSettings() = OrbitJson.kindleSettings(request("GET", "/api/account/kindle"))
+
+    suspend fun saveKindleEmail(email: String) = OrbitJson.kindleSettings(
+        request("PUT", "/api/account/kindle", JSONObject().put("email", email.trim())),
+    )
+
+    suspend fun clearKindleEmail() = OrbitJson.kindleSettings(request("DELETE", "/api/account/kindle"))
+
+    suspend fun sendLibraryBookToKindle(bookId: String) {
+        request("POST", "/api/library/books/$bookId/send-to-kindle", JSONObject())
+    }
+
     suspend fun libraryReaders(bookId: String) =
         OrbitJson.libraryReaders(request("GET", "/api/library/books/$bookId/reads"))
 

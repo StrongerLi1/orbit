@@ -42,6 +42,7 @@ from .auth import (
     revoke_refresh_token,
     set_user_banned,
     set_auth_cookies,
+    set_user_kindle_email,
     set_user_roles,
     touch_login,
     validate_credentials_input,
@@ -63,6 +64,16 @@ from .library_files import (
     remove_file,
     save_upload,
     temporary_path,
+)
+from .kindle_mail import (
+    KindleDeliveryError,
+    can_send_book,
+    enforce_send_limit,
+    kindle_redis_client,
+    kindle_settings_payload,
+    send_book,
+    smtp_is_configured,
+    validate_kindle_email,
 )
 from .repository import (
     create_book,
@@ -681,6 +692,27 @@ def auth_logout(request: Request, response: Response):
     revoke_refresh_token(request.cookies.get("orbit_refresh", ""))
     clear_auth_cookies(response)
     return {"ok": True}
+
+
+@app.get("/api/account/kindle")
+def account_kindle(request: Request):
+    return kindle_settings_payload(require_user(request))
+
+
+@app.put("/api/account/kindle")
+async def account_kindle_update(request: Request):
+    user = require_user(request)
+    data = await request.json()
+    email = validate_kindle_email(data.get("email") if isinstance(data, dict) else "")
+    set_user_kindle_email(user["id"], email)
+    return kindle_settings_payload({**user, "kindle_email": email})
+
+
+@app.delete("/api/account/kindle")
+def account_kindle_delete(request: Request):
+    user = require_user(request)
+    set_user_kindle_email(user["id"], "")
+    return kindle_settings_payload({**user, "kindle_email": ""})
 
 
 @app.get("/api/netdisk/search")
@@ -1342,7 +1374,7 @@ def _library_book_or_404(book_id: str, user_id: str) -> dict[str, Any]:
 @app.get("/api/library/books")
 def library_books(request: Request, q: str = ""):
     user = require_permission(request, "library:read")
-    return list_books(user["id"], q)
+    return [{**book, "canSendToKindle": can_send_book(book)} for book in list_books(user["id"], q)]
 
 
 @app.post("/api/library/books", status_code=201)
@@ -1522,6 +1554,35 @@ def library_download_book(book_id: str, request: Request):
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
     return _library_book_file_response(book)
+
+
+@app.post("/api/library/books/{book_id}/send-to-kindle")
+def library_send_to_kindle(book_id: str, request: Request):
+    user = require_permission(request, "library:read")
+    kindle_email = str(user.get("kindle_email") or "")
+    if not kindle_email:
+        raise HTTPException(status_code=409, detail="请先设置 Kindle 邮箱")
+    book = get_book_storage(book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    file_format = str(book.get("file_format") or "").lower()
+    if file_format not in {"epub", "pdf", "txt"}:
+        raise HTTPException(status_code=415, detail="Kindle 邮箱发送仅支持 EPUB、PDF 和 TXT")
+    if int(book.get("file_size") or 0) > settings.kindle_max_attachment_mb * 1024 * 1024:
+        raise HTTPException(status_code=413, detail=f"附件不能超过 {settings.kindle_max_attachment_mb} MB")
+    path = book_path(book["stored_filename"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    if not smtp_is_configured():
+        raise HTTPException(status_code=503, detail="Kindle 邮件发送服务尚未配置")
+    enforce_send_limit(user["id"], kindle_redis_client(), "admin" in user.get("roles", []))
+    filename = clean_download_name(book["original_filename"], book["title"], file_format)
+    try:
+        send_book(kindle_email, path, filename, book["title"], file_format)
+    except KindleDeliveryError as error:
+        logger.warning("Kindle email delivery failed for book %s", book_id)
+        raise HTTPException(status_code=502, detail="邮件发送失败，请稍后再试") from error
+    return {"status": "sent"}
 
 
 def _library_book_file_response(book: dict[str, Any]) -> FileResponse:

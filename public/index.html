@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20261012-film-diary">
+  <link rel="stylesheet" href="/styles.css?v=20261015-kindle-email">
   <link rel="stylesheet" href="/writings.css?v=20260719-writing-posts">
 </head>
 <body>
@@ -126,7 +126,7 @@
         </section>
 
         <section class="page" id="library">
-          <div class="page-title"><div><p class="eyebrow">SHARED LIBRARY</p><h1>共享图书馆</h1><p>一起收藏值得读的书，也留下每一次阅读。</p></div><button class="primary" data-library-upload>＋ 上传电子书</button></div>
+          <div class="page-title"><div><p class="eyebrow">SHARED LIBRARY</p><h1>共享图书馆</h1><p>一起收藏值得读的书，也留下每一次阅读。</p></div><div class="page-title-actions"><button class="secondary" data-kindle-settings>Kindle 设置</button><button class="primary" data-library-upload>＋ 上传电子书</button></div></div>
           <div class="library-toolbar">
             <label class="library-search"><span>⌕</span><input id="library-search" type="search" autocomplete="off" maxlength="100" placeholder="搜索书名或作者" aria-label="搜索书名或作者"></label>
             <div class="filters" id="library-filters">
@@ -289,10 +289,20 @@
       <div class="form-actions"><button type="button" class="secondary" data-library-close>关闭</button><button type="button" class="primary" id="library-share-copy" data-library-share-copy disabled>复制链接</button></div>
     </div>
   </div>
+  <div class="modal-backdrop" id="kindle-settings-modal" hidden>
+    <div class="modal kindle-settings-modal" role="dialog" aria-modal="true" aria-labelledby="kindle-settings-title">
+      <div class="modal-head"><div><span class="label">SEND TO KINDLE</span><h2 id="kindle-settings-title">Kindle 邮箱设置</h2></div><button class="close" data-library-close aria-label="关闭">×</button></div>
+      <form id="kindle-settings-form">
+        <div class="field"><label>你的 Kindle 邮箱</label><input name="email" type="email" maxlength="320" placeholder="name@kindle.com" required><small>可在 Amazon 的“管理我的内容和设备”中查看。</small></div>
+        <div class="kindle-settings-hint" id="kindle-settings-hint"></div>
+        <div class="form-actions"><button type="button" class="delete-account" data-kindle-clear hidden>清除</button><button type="button" class="secondary" data-library-close>取消</button><button type="submit" class="primary">保存</button></div>
+      </form>
+    </div>
+  </div>
   <div class="quick-menu" id="quick-menu" hidden><button data-add="bookmarks">◇ 收藏网站</button><button data-library-upload>▤ 上传电子书</button><button data-page-link="netdisk">⌕ 网盘搜索</button><button data-add="excerpts">“ 添加摘录</button><button data-add="plans">◷ 安排计划</button><button data-add="todos">✓ 新建待办</button></div>
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20261012-film-diary"></script>
+  <script src="/app.js?v=20261015-kindle-email"></script>
 </body>
 </html>

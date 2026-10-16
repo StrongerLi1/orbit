@@ -50,6 +50,8 @@ Run this checklist against a disposable account on both API 26 and the current t
 - [ ] Create, toggle anonymity, and delete a review according to the server-projected ownership controls; another account cannot see owner-only actions.
 - [ ] Download every supported format through Android's Save As picker. The chosen filename/MIME are sensible, cancellation is harmless, and no private duplicate remains in app storage.
 - [ ] Create a public share link, copy it, and send it through the Android share sheet. An administrator can regenerate or revoke it only after confirmation, and an old/revoked URL stops downloading.
+- [ ] Save and clear the current account's `@kindle.com` address, including the approved-sender hint. Send EPUB/PDF/TXT and verify the success copy does not claim Kindle ingestion; MOBI/AZW3 show no send action.
+- [ ] A normal account is limited to 5 Kindle sends per hour and receives a readable 429; an administrator remains unlimited while format, size, file, and SMTP checks still apply.
 - [ ] Library-only 403, offline, cover, upload, download, and detail failures remain isolated from Home and the other content sections.
 
 ## Hermes and administration
