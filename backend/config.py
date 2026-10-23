@@ -31,7 +31,7 @@ class Settings:
     kindle_smtp_password = os.getenv("KINDLE_SMTP_PASSWORD", "")
     kindle_smtp_from = os.getenv("KINDLE_SMTP_FROM", "").strip()
     kindle_smtp_security = os.getenv("KINDLE_SMTP_SECURITY", "starttls").strip().lower()
-    kindle_smtp_timeout_seconds = max(1.0, float(os.getenv("KINDLE_SMTP_TIMEOUT_SECONDS", "15")))
+    kindle_smtp_timeout_seconds = max(1.0, float(os.getenv("KINDLE_SMTP_TIMEOUT_SECONDS", "120")))
     kindle_max_attachment_mb = max(1, min(50, int(os.getenv("KINDLE_MAX_ATTACHMENT_MB", "25"))))
     hermes_dashboard_url = os.getenv("HERMES_DASHBOARD_URL", "http://127.0.0.1:9119").rstrip("/")
     hermes_dashboard_public_path = os.getenv("HERMES_DASHBOARD_PUBLIC_PATH", "/hermes-dashboard").rstrip("/") or "/hermes-dashboard"

@@ -22,7 +22,21 @@ KINDLE_RATE_WINDOW_SECONDS = 60 * 60
 
 
 class KindleDeliveryError(Exception):
-    pass
+    CATEGORIES = {"timeout", "smtp", "network", "invalid"}
+
+    def __init__(self, category: str):
+        self.category = category if category in self.CATEGORIES else "unknown"
+        super().__init__(self.category)
+
+
+def _delivery_error_category(error: Exception) -> str:
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    if isinstance(error, smtplib.SMTPException):
+        return "smtp"
+    if isinstance(error, OSError):
+        return "network"
+    return "invalid"
 
 
 def validate_kindle_email(value: Any) -> str:
@@ -123,4 +137,4 @@ def send_book(to_email: str, path: Path, filename: str, title: str, file_format:
                 client.login(settings.kindle_smtp_username, settings.kindle_smtp_password)
             client.send_message(message)
     except (OSError, ValueError, smtplib.SMTPException) as error:
-        raise KindleDeliveryError(str(error)) from error
+        raise KindleDeliveryError(_delivery_error_category(error)) from error

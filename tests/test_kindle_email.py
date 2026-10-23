@@ -143,8 +143,9 @@ def test_smtp_message() -> None:
             try:
                 kindle_mail.send_book("reader@kindle.com", path, "book.pdf", "书名", "pdf")
                 raise AssertionError("timeout must fail")
-            except kindle_mail.KindleDeliveryError:
-                pass
+            except kindle_mail.KindleDeliveryError as error:
+                assert error.category == "timeout"
+                assert str(error) == "timeout"
     finally:
         settings.kindle_smtp_host = original["host"]
         settings.kindle_smtp_port = original["port"]
@@ -165,8 +166,10 @@ def test_send_route() -> None:
         "limit": main_module.enforce_send_limit,
         "send": main_module.send_book,
         "storage": settings.library_storage_dir,
+        "warning": main_module.logger.warning,
     }
     calls = []
+    warnings = []
     try:
         with tempfile.TemporaryDirectory() as directory:
             settings.library_storage_dir = Path(directory)
@@ -204,8 +207,10 @@ def test_send_route() -> None:
                 raise kindle_mail.KindleDeliveryError("private smtp detail")
 
             main_module.send_book = fail_send
+            main_module.logger.warning = lambda *args: warnings.append(args)
             assert_http(502, lambda: main_module.library_send_to_kindle("b1", FakeRequest()))
             assert calls[-1] == ("admin", True)
+            assert warnings[-1][1:] == ("b1", "unknown", 4)
 
             main_module.get_book_storage = lambda _book_id: {"file_format": "azw3", "file_size": 4}
             before = len(calls)
@@ -232,6 +237,7 @@ def test_send_route() -> None:
         main_module.enforce_send_limit = original["limit"]
         main_module.send_book = original["send"]
         settings.library_storage_dir = original["storage"]
+        main_module.logger.warning = original["warning"]
 
 
 def test_private_account_settings() -> None:

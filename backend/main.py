@@ -1580,7 +1580,12 @@ def library_send_to_kindle(book_id: str, request: Request):
     try:
         send_book(kindle_email, path, filename, book["title"], file_format)
     except KindleDeliveryError as error:
-        logger.warning("Kindle email delivery failed for book %s", book_id)
+        logger.warning(
+            "Kindle email delivery failed for book %s category=%s size_bytes=%s",
+            book_id,
+            error.category,
+            int(book.get("file_size") or 0),
+        )
         raise HTTPException(status_code=502, detail="邮件发送失败，请稍后再试") from error
     return {"status": "sent"}
 
