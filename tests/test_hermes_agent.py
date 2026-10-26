@@ -5,12 +5,14 @@ import sys
 from collections import OrderedDict
 from contextlib import redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import HTTPException
 
 from backend.config import settings
+import backend.auth as auth_module
 import backend.hermes_stream_bridge as bridge_module
 import backend.main as main_module
 from backend.hermes_stream_pool import HermesStreamPool
@@ -62,6 +64,35 @@ class FakeRequest:
 
 
 def main() -> None:
+    original_redis = auth_module._redis
+    original_get_user = auth_module.get_user_by_id
+    original_attach = auth_module.attach_user_access
+    try:
+        refresh = auth_module._jwt_encode({"typ": "refresh", "sub": "owner", "jti": "session"}, 60)
+        request = SimpleNamespace(cookies={"orbit_access": "expired", "orbit_refresh": refresh})
+        auth_module._redis = lambda: SimpleNamespace(get=lambda _key: "owner")
+        auth_module.get_user_by_id = lambda _id: {"id": "owner", "is_banned": False}
+        auth_module.attach_user_access = lambda user: {**user, "permissions": ["agents:manage"]}
+        assert auth_module.require_permission(request, "agents:manage", allow_refresh=True)["id"] == "owner"
+        auth_module.attach_user_access = lambda user: {**user, "permissions": []}
+        try:
+            auth_module.require_permission(request, "agents:manage", allow_refresh=True)
+            raise AssertionError("refresh credentials must not bypass permissions")
+        except HTTPException as error:
+            assert error.status_code == 403
+        for allowed in (False, True):
+            if allowed:
+                auth_module._redis = lambda: SimpleNamespace(get=lambda _key: None)
+            try:
+                auth_module.require_permission(request, "agents:manage", allow_refresh=allowed)
+                raise AssertionError("expired or revoked credentials must fail")
+            except HTTPException as error:
+                assert error.status_code == 401
+    finally:
+        auth_module._redis = original_redis
+        auth_module.get_user_by_id = original_get_user
+        auth_module.attach_user_access = original_attach
+
     original_command = settings.hermes_dashboard_command
     original_url = settings.hermes_dashboard_url
     original_timeout = settings.hermes_dashboard_timeout

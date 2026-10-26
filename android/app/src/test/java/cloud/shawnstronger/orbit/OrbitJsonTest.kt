@@ -26,6 +26,14 @@ class OrbitJsonTest {
         assertTrue(book.canSendToKindle)
     }
 
+    @Test fun todoLabelsAndLegacyTodosDecode() {
+        val labels = OrbitJson.todoLabels("""[{"id":"label-1","name":"工作","createdAt":"now"}]""")
+        assertEquals("工作", labels.single().name)
+        val todos = OrbitJson.todos("""[{"id":"a","title":"已分类","priority":"high","dueDate":"","completed":false,"createdAt":"now","labelId":"label-1"},{"id":"b","title":"旧待办","priority":"medium","dueDate":"","completed":false,"createdAt":"then"}]""")
+        assertEquals("label-1", todos[0].labelId)
+        assertEquals(null, todos[1].labelId)
+    }
+
     @Test fun permissionsComeFromServerPayload() {
         val user = OrbitJson.user(
             """{"id":"u","username":"reader","roles":["user"],"permissions":["content:read","hermes:chat"]}""",

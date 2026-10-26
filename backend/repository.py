@@ -66,7 +66,7 @@ def _excerpt_row(row: dict[str, Any], current_user_id: str = "", is_admin: bool 
 ROW_MAPPERS = {
     "folders": lambda row: {"id": row["id"], "name": row["name"], "sortOrder": row["sort_order"], "createdAt": row["created_at"]},
     "bookmarks": lambda row: {"id": row["id"], "title": row["title"], "url": row["url"], "category": row["category"], "note": row["note"], "favorite": bool(row["favorite"]), "createdAt": row["created_at"]},
-    "todos": lambda row: {"id": row["id"], "title": row["title"], "priority": row["priority"], "dueDate": row["due_date"], "completed": bool(row["completed"]), "createdAt": row["created_at"]},
+    "todos": lambda row: {"id": row["id"], "title": row["title"], "priority": row["priority"], "dueDate": row["due_date"], "completed": bool(row["completed"]), "labelId": row.get("label_id"), "createdAt": row["created_at"]},
     "plans": _plan_row,
     "excerpts": _excerpt_row,
 }
@@ -130,7 +130,7 @@ def create_item(collection: str, item: dict[str, Any], current_user: dict[str, A
             elif collection == "bookmarks":
                 cursor.execute("INSERT INTO bookmarks (id, title, url, category, note, favorite, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)", (item_id, item["title"], item["url"], item["category"], item["note"], 1 if item["favorite"] else 0, created_at))
             elif collection == "todos":
-                cursor.execute("INSERT INTO todos (id, owner_user_id, title, priority, due_date, completed, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s)", (item_id, owner_user_id, item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, created_at))
+                cursor.execute("INSERT INTO todos (id, owner_user_id, label_id, title, priority, due_date, completed, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)", (item_id, owner_user_id, item.get("labelId"), item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, created_at))
             elif collection == "plans":
                 cursor.execute("INSERT INTO plans (id, owner_user_id, title, frequency_type, target_count, start_date, end_date, completions, time, duration, color, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)", (item_id, owner_user_id, item["title"], item["frequencyType"], item["targetCount"], item["startDate"], item["endDate"], json.dumps(item["completions"], ensure_ascii=False), item["time"], item["duration"], item["color"], created_at))
             elif collection == "excerpts":
@@ -158,7 +158,7 @@ def update_item(collection: str, item_id: str, item: dict[str, Any], current_use
             elif collection == "bookmarks":
                 cursor.execute("UPDATE bookmarks SET title = %s, url = %s, category = %s, note = %s, favorite = %s WHERE id = %s", (item["title"], item["url"], item["category"], item["note"], 1 if item["favorite"] else 0, item_id))
             elif collection == "todos":
-                cursor.execute("UPDATE todos SET title = %s, priority = %s, due_date = %s, completed = %s WHERE id = %s AND owner_user_id = %s", (item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, item_id, owner_user_id))
+                cursor.execute("UPDATE todos SET title = %s, priority = %s, due_date = %s, completed = %s, label_id = %s WHERE id = %s AND owner_user_id = %s", (item["title"], item["priority"], item["dueDate"], 1 if item["completed"] else 0, item.get("labelId"), item_id, owner_user_id))
             elif collection == "plans":
                 cursor.execute("UPDATE plans SET title = %s, frequency_type = %s, target_count = %s, start_date = %s, end_date = %s, completions = %s, time = %s, duration = %s, color = %s WHERE id = %s AND owner_user_id = %s", (item["title"], item["frequencyType"], item["targetCount"], item["startDate"], item["endDate"], json.dumps(item["completions"], ensure_ascii=False), item["time"], item["duration"], item["color"], item_id, owner_user_id))
             elif collection == "excerpts":
@@ -471,6 +471,58 @@ def folder_exists(name: str) -> bool:
         with conn.cursor() as cursor:
             cursor.execute("SELECT id FROM folders WHERE LOWER(name) = LOWER(%s)", (name,))
             return cursor.fetchone() is not None
+
+
+def _todo_label(row: dict[str, Any]) -> dict[str, Any]:
+    return {"id": row["id"], "name": row["name"], "createdAt": row["created_at"]}
+
+
+def list_todo_labels(owner_id: str) -> list[dict[str, Any]]:
+    if not owner_id:
+        raise ValueError("待办标签必须绑定当前用户")
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM todo_labels WHERE owner_user_id = %s ORDER BY created_at ASC, name ASC", (owner_id,))
+            return [_todo_label(row) for row in cursor.fetchall()]
+
+
+def get_todo_label(label_id: str, owner_id: str) -> dict[str, Any] | None:
+    if not owner_id:
+        raise ValueError("待办标签必须绑定当前用户")
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM todo_labels WHERE id = %s AND owner_user_id = %s", (label_id, owner_id))
+            row = cursor.fetchone()
+            return _todo_label(row) if row else None
+
+
+def create_todo_label(name: str, owner_id: str) -> dict[str, Any]:
+    if not owner_id:
+        raise ValueError("待办标签必须绑定当前用户")
+    label_id = str(uuid.uuid4())
+    created_at = now_iso()
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("INSERT INTO todo_labels (id, owner_user_id, name, created_at) VALUES (%s, %s, %s, %s)", (label_id, owner_id, name, created_at))
+    return {"id": label_id, "name": name, "createdAt": created_at}
+
+
+def update_todo_label(label_id: str, name: str, owner_id: str) -> bool:
+    if not owner_id:
+        raise ValueError("待办标签必须绑定当前用户")
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("UPDATE todo_labels SET name = %s WHERE id = %s AND owner_user_id = %s", (name, label_id, owner_id))
+            return cursor.rowcount > 0
+
+
+def delete_todo_label(label_id: str, owner_id: str) -> bool:
+    if not owner_id:
+        raise ValueError("待办标签必须绑定当前用户")
+    with connection() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM todo_labels WHERE id = %s AND owner_user_id = %s", (label_id, owner_id))
+            return cursor.rowcount > 0
 
 
 def folder_has_bookmarks(name: str) -> bool:

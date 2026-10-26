@@ -2,7 +2,7 @@ const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getM
 const shiftDate = (key, amount) => { const date = new Date(`${key}T00:00:00`); date.setDate(date.getDate() + amount); return dateKey(date); };
 const localDateTimeValue = (value = '') => { const date = value ? new Date(value) : new Date(); const offset = date.getTimezoneOffset() * 60_000; return new Date(date.getTime() - offset).toISOString().slice(0, 16); };
 const formatLocalDateTime = (value) => value ? new Intl.DateTimeFormat('zh-CN', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false }).format(new Date(value)) : '';
-const state = { user: null, authMode: 'login', bookmarks: [], todos: [], plans: [], folders: [], excerpts: [], writings: [], filmRolls: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', shareBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '', kindleSettings: null, sendingBookId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
+const state = { user: null, authMode: 'login', bookmarks: [], todos: [], todoLabels: [], todoFilter: 'all', todoLabelManaging: false, plans: [], folders: [], excerpts: [], writings: [], filmRolls: [], featuredExcerptId: '', category: '全部', search: '', planDate: dateKey(), folderManaging: false, library: { books: [], filter: 'all', search: '', searchTimer: null, searchRequest: 0, loading: false, activeBookId: '', readers: null, reviews: null, reviewBookId: '', shareBookId: '', bookMode: 'upload', editBookId: '', readBookId: '', editReadId: '', kindleSettings: null, sendingBookId: '' }, admin: { users: [], roles: [], permissions: [], hermesChats: [], hermesChatActive: null, loading: false }, hermes: { loading: false, configured: false, installed: false, running: false, dashboardUrl: 'http://127.0.0.1:9119', dashboardPublicUrl: '/hermes-dashboard/', message: '', details: '' }, hermesChat: { loading: false, sending: false, stopping: false, stopped: false, controller: null, stream: null, conversations: [], activeId: '', active: null, error: '' }, netdisk: { keyword: '', loading: false, source: '', results: [], raw: null, error: '', selectedSource: '全部' }, integrations: { lxMusic: { enabled: false, publicUrl: '' } }, captcha: { pending: null, busy: false, mounted: false } };
 let hermesGenerationPollTimer = 0;
 let authReturnTarget = new URLSearchParams(location.search).get('next') === 'music' ? 'music' : '';
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -108,6 +108,9 @@ function resetToLoginRoute() {
 function showAuth(mode = 'login') {
   state.authMode = mode;
   state.user = null;
+  state.todoLabels = [];
+  state.todoFilter = 'all';
+  state.todoLabelManaging = false;
   resetToLoginRoute();
   $('#auth-screen').hidden = false;
   $('.app-shell').hidden = true;
@@ -186,10 +189,11 @@ function mountAuthCaptcha() {
 }
 
 async function load() {
-  [state.bookmarks, state.todos, state.plans, state.folders, state.excerpts, state.writings, state.filmRolls, state.library.books] = await Promise.all([
+  [state.bookmarks, state.todos, state.plans, state.folders, state.excerpts, state.writings, state.filmRolls, state.library.books, state.todoLabels] = await Promise.all([
     ...['bookmarks','todos','plans','folders','excerpts','writings'].map((type) => request(`/api/${type}`)),
     request('/api/film-rolls'),
     canReadLibrary() ? request('/api/library/books') : Promise.resolve([]),
+    request('/api/todo-labels').catch((error) => { toast(`待办标签加载失败：${error.message}`); return state.todoLabels; }),
   ]);
   if (!state.excerpts.some((excerpt) => excerpt.id === state.featuredExcerptId)) chooseFeaturedExcerpt();
   render();
@@ -205,6 +209,8 @@ function chooseFeaturedExcerpt() {
 function render() {
   const activeTodos = state.todos.filter((t) => !t.completed);
   const doneTodos = state.todos.filter((t) => t.completed);
+  if (state.todoFilter !== 'all' && state.todoFilter !== 'unclassified' && !state.todoLabels.some((label) => label.id === state.todoFilter)) state.todoFilter = 'unclassified';
+  const visibleTodos = state.todos.filter((todo) => state.todoFilter === 'all' || (state.todoFilter === 'unclassified' ? !todo.labelId : todo.labelId === state.todoFilter));
   const todayPlans = plansForDate(dateKey());
   const donePlans = todayPlans.filter((plan) => { const progress = planProgress(plan, dateKey()); return progress.done >= progress.target; }).length;
   $('#stats').innerHTML = [
@@ -236,9 +242,12 @@ function render() {
   visibleBookmarks.sort((a, b) => Number(b.favorite) - Number(a.favorite) || a.title.localeCompare(b.title, 'zh-CN'));
   $('#bookmarks-grid').innerHTML = visibleBookmarks.map(bookmarkHtml).join('') || empty('没有找到匹配的收藏');
   renderPlanStatistics();
-  $('#todos-active').innerHTML = activeTodos.map(todoHtml).join('') || empty('现在没有待办');
-  $('#todos-completed').innerHTML = doneTodos.map(todoHtml).join('') || empty('完成的事项会出现在这里');
-  $('#active-count').textContent = `${activeTodos.length} 项`;
+  $('#todo-label-filters').innerHTML = state.todoLabels.map((label) => `<span class="todo-label-chip"><button class="filter ${state.todoFilter === label.id ? 'active' : ''}" data-todo-filter="${escapeHtml(label.id)}">${escapeHtml(label.name)}</button>${state.todoLabelManaging ? `<button class="text-btn" data-edit-todo-label="${escapeHtml(label.id)}" aria-label="重命名 ${escapeHtml(label.name)}">编辑</button><button class="text-btn" data-delete-todo-label="${escapeHtml(label.id)}" aria-label="删除 ${escapeHtml(label.name)}">×</button>` : ''}</span>`).join('');
+  $$('[data-todo-filter]').forEach((button) => button.classList.toggle('active', button.dataset.todoFilter === state.todoFilter));
+  $('#todo-label-manage').textContent = state.todoLabelManaging ? '完成管理' : '管理标签';
+  $('#todos-active').innerHTML = visibleTodos.filter((todo) => !todo.completed).map((todo) => todoHtml(todo, true)).join('') || empty('现在没有待办');
+  $('#todos-completed').innerHTML = visibleTodos.filter((todo) => todo.completed).map((todo) => todoHtml(todo, true)).join('') || empty('完成的事项会出现在这里');
+  $('#active-count').textContent = `${visibleTodos.filter((todo) => !todo.completed).length} 项`;
   renderLibrary();
   renderNetdisk();
   renderHermesChat();
@@ -1064,7 +1073,8 @@ function folderOptions(selected = '') { return orderedFolders().map((folder) => 
 function empty(text) { return `<div class="empty">${text}</div>`; }
 function planHtml(p) { const progress = planProgress(p, dateKey()); const done = progress.done >= progress.target; return `<div class="plan-item"><span class="plan-time">${p.time}</span><span class="plan-dot ${p.color}"></span><span class="plan-name ${done?'todo-title done':''}">${escapeHtml(p.title)}</span><span class="duration">${periodLabel(p)} ${progress.done}/${progress.target}</span></div>`; }
 function timelineHtml(p) { const progress = planProgress(p, state.planDate); const todayCount = Number(p.completions?.[state.planDate] || 0); const done = progress.done >= progress.target; return `<div class="timeline-item recurring"><span class="plan-time">${p.time}</span><span class="plan-dot ${p.color}"></span><div><div class="plan-title-line"><h3 class="${done?'todo-title done':''}">${escapeHtml(p.title)}</h3><span class="type-pill">${planTypeLabels[p.frequencyType]}</span></div><p>${periodLabel(p)} ${progress.done}/${progress.target} 次 · 每次 ${p.duration} 分钟${todayCount ? ` · 今天 ${todayCount} 次` : ''}</p></div><div class="count-stepper"><button data-plan-count="-1" data-id="${p.id}" aria-label="减少 ${escapeHtml(p.title)} 打卡" ${todayCount ? '' : 'disabled'}>−</button><strong>${todayCount}</strong><button data-plan-count="1" data-id="${p.id}" aria-label="完成一次 ${escapeHtml(p.title)}">＋</button></div></div>`; }
-function todoHtml(t) { return `<div class="todo-item"><button class="check ${t.completed?'done':''}" data-toggle="todos" data-id="${t.id}">${t.completed?'✓':''}</button><span class="priority ${t.priority}"></span><span class="todo-title ${t.completed?'done':''}">${escapeHtml(t.title)}</span>${t.dueDate?`<span class="duration">${escapeHtml(t.dueDate)}</span>`:''}<button class="delete" data-delete="todos" data-id="${t.id}" aria-label="删除">×</button></div>`; }
+function todoLabelOptions(selected = '') { return `<option value="">未分类</option>${state.todoLabels.map((label) => `<option value="${escapeHtml(label.id)}" ${label.id === selected ? 'selected' : ''}>${escapeHtml(label.name)}</option>`).join('')}`; }
+function todoHtml(t, movable = false) { const label = state.todoLabels.find((item) => item.id === t.labelId); return `<div class="todo-item"><button class="check ${t.completed?'done':''}" data-toggle="todos" data-id="${t.id}" aria-label="${t.completed?'重新打开':'完成'} ${escapeHtml(t.title)}">${t.completed?'✓':''}</button><span class="priority ${t.priority}"></span><span class="todo-title ${t.completed?'done':''}">${escapeHtml(t.title)}</span>${t.dueDate?`<span class="duration">${escapeHtml(t.dueDate)}</span>`:''}${movable ? `<select class="todo-label-select" data-move-todo="${escapeHtml(t.id)}" aria-label="更改 ${escapeHtml(t.title)} 的标签">${todoLabelOptions(t.labelId)}</select>` : `<span class="duration">${escapeHtml(label?.name || '未分类')}</span>`}<button class="delete" data-delete="todos" data-id="${t.id}" aria-label="删除 ${escapeHtml(t.title)}">×</button></div>`; }
 function bookmarkHtml(b) { return `<article class="bookmark-card"><div class="bookmark-top"><span class="site-icon">${escapeHtml(b.title[0])}</span><div><a href="${escapeHtml(b.url)}" target="_blank" rel="noreferrer"><h3>${escapeHtml(b.title)}</h3></a><span class="domain">${escapeHtml(host(b.url))}</span></div></div><p>${escapeHtml(b.note || '暂无备注')}</p><div class="bookmark-foot"><label class="folder-picker" title="更换收藏夹"><span>▣</span><select data-move-bookmark="${b.id}" aria-label="移动 ${escapeHtml(b.title)}">${folderOptions(b.category)}</select></label><div><button class="favorite ${b.favorite?'on':''}" data-favorite="${b.id}">★</button><button class="delete" data-delete="bookmarks" data-id="${b.id}">×</button></div></div></article>`; }
 function excerptHtml(excerpt) { const attribution = [excerpt.author, excerpt.source].filter(Boolean).join(' · '); const author = `${excerpt.createdByName || 'admin'}${excerpt.isAnonymous && excerpt.canToggleAnonymous ? ' · 匿名' : ''}`; const actions = excerpt.canManage ? `<div class="excerpt-actions"><button class="text-btn" data-edit="excerpts" data-id="${escapeHtml(excerpt.id)}">编辑</button><button class="delete" data-delete="excerpts" data-id="${escapeHtml(excerpt.id)}" aria-label="删除摘录">×</button></div>` : ''; return `<article class="excerpt-card"><span class="excerpt-mark">“</span><blockquote>${escapeHtml(excerpt.content)}</blockquote><div class="excerpt-meta"><div><strong>${escapeHtml(attribution || '未注明出处')}</strong><small>${escapeHtml(excerpt.excerptDate || '未填写日期')} · ${escapeHtml(author)} 摘录</small></div>${actions}</div>${excerpt.note ? `<p>${escapeHtml(excerpt.note)}</p>` : ''}</article>`; }
 function writingHtml(post) { const visibility = post.visibility === 'private' ? '仅自己可见' : '公开'; const byline = `${post.createdByName || '匿名用户'}${post.isOwn && post.isAnonymous ? ' · 匿名' : ''}`; const actions = post.canManage ? `<div class="writing-actions"><button class="text-btn" data-edit="writings" data-id="${escapeHtml(post.id)}">编辑</button><button class="delete" data-delete="writings" data-id="${escapeHtml(post.id)}" aria-label="删除内容">×</button></div>` : ''; return `<article class="writing-card ${post.visibility === 'private' ? 'is-private' : ''}"><div class="writing-head"><div><span class="writing-visibility">${visibility}</span><strong>${escapeHtml(byline)}</strong></div>${actions}</div><p>${escapeHtml(post.content)}</p><time datetime="${escapeHtml(post.updatedAt || post.createdAt)}">${escapeHtml(post.updatedAt || post.createdAt)}</time></article>`; }
@@ -1095,15 +1105,16 @@ const forms = {
   'film-rolls': { title:'新建胶卷', label:'NEW FILM ROLL', fields:(item = {}) => `<div class="field"><label>胶卷名称 / 型号</label><input name="filmStock" required maxlength="160" value="${escapeHtml(item.filmStock || '')}" placeholder="例如：Kodak Gold 200"></div><div class="form-row"><div class="field"><label>相机</label><input name="camera" required maxlength="160" value="${escapeHtml(item.camera || '')}" placeholder="例如：Nikon FM2"></div><div class="field"><label>感光度（可选）</label><input name="iso" type="number" min="1" max="25600" value="${escapeHtml(item.iso ?? '')}" placeholder="200"></div></div><div class="field"><label>状态</label><select name="status"><option value="active" ${item.status !== 'finished' ? 'selected' : ''}>拍摄中</option><option value="finished" ${item.status === 'finished' ? 'selected' : ''}>已拍完</option></select></div>` },
   'film-exposures': { title:'记录一次曝光', label:'NEW EXPOSURE', fields:(item = {}) => `<div class="form-row"><div class="field"><label>画幅序号</label><input name="frameNumber" type="number" min="0" max="999" required value="${escapeHtml(item.frameNumber ?? 1)}"></div><div class="field"><label>拍摄时间</label><input name="takenAt" type="datetime-local" required value="${escapeHtml(localDateTimeValue(item.takenAt || ''))}"></div></div><div class="field"><label>地点（可选）</label><input name="location" maxlength="300" value="${escapeHtml(item.location || '')}" placeholder="例如：上海 · 武康路"></div><div class="field"><label>当时的想法（可选）</label><textarea name="thoughts" maxlength="3000" placeholder="为什么想拍下这一幕？">${escapeHtml(item.thoughts || '')}</textarea></div><div class="form-row"><div class="field"><label>镜头（可选）</label><input name="lens" maxlength="160" value="${escapeHtml(item.lens || '')}" placeholder="50mm f/1.8"></div><div class="field"><label>光圈（可选）</label><input name="aperture" maxlength="40" value="${escapeHtml(item.aperture || '')}" placeholder="f/5.6"></div></div><div class="field"><label>快门速度（可选）</label><input name="shutterSpeed" maxlength="40" value="${escapeHtml(item.shutterSpeed || '')}" placeholder="1/250s"></div>` },
   folders: { title:'新建收藏夹', label:'NEW COLLECTION', fields:`<div class="field"><label>收藏夹名称</label><input name="name" required maxlength="30" placeholder="例如：旅行灵感"></div>` },
-  todos: { title:'添加待办', label:'NEW TO-DO', fields:`<div class="field"><label>待办内容</label><input name="title" required placeholder="我准备完成…"></div><div class="form-row"><div class="field"><label>优先级</label><select name="priority"><option value="medium">普通</option><option value="high">重要</option><option value="low">低</option></select></div><div class="field"><label>截止日期</label><input name="dueDate" type="date"></div></div>` },
+  'todo-labels': { title:'新建待办标签', label:'NEW LABEL', fields:(item = {}) => `<div class="field"><label>标签名称</label><input name="name" required maxlength="30" value="${escapeHtml(item.name || '')}" placeholder="例如：工作"></div>` },
+  todos: { title:'添加待办', label:'NEW TO-DO', fields:() => `<div class="field"><label>待办内容</label><input name="title" required placeholder="我准备完成…"></div><div class="field"><label>标签</label><select name="labelId">${todoLabelOptions($('#todos').classList.contains('active') && state.todoFilter !== 'all' && state.todoFilter !== 'unclassified' ? state.todoFilter : '')}</select></div><div class="form-row"><div class="field"><label>优先级</label><select name="priority"><option value="medium">普通</option><option value="high">重要</option><option value="low">低</option></select></div><div class="field"><label>截止日期</label><input name="dueDate" type="date"></div></div>` },
   plans: { title:'制定计划', label:'NEW PLAN', fields:() => `<div class="field"><label>计划名称</label><input name="title" required placeholder="例如：晨间阅读"></div><div class="form-row"><div class="field"><label>计划类型</label><select name="frequencyType"><option value="daily">日常计划</option><option value="weekly">周常计划</option><option value="monthly">月度计划</option></select></div><div class="field"><label>每周期目标次数</label><input name="targetCount" type="number" min="1" max="99" value="1" required></div></div><div class="form-row"><div class="field"><label>开始日期</label><input name="startDate" type="date" required value="${state.planDate}"></div><div class="field"><label>结束日期（可选）</label><input name="endDate" type="date"></div></div><div class="form-row"><div class="field"><label>提醒时间</label><input name="time" type="time" required value="09:00"></div><div class="field"><label>每次时长（分钟）</label><input name="duration" type="number" min="5" max="480" value="30"></div></div><div class="field"><label>标记颜色</label><select name="color"><option value="violet">紫色</option><option value="orange">橙色</option><option value="green">绿色</option><option value="blue">蓝色</option></select></div>` }
 };
 
 function openModal(type, item = null, rollId = '') {
   const config = forms[type];
   const editing = Boolean(item?.id);
-  const editNames = { excerpts:'摘录', writings:'内容', 'film-rolls':'胶卷', 'film-exposures':'曝光记录' };
-  $('#modal-title').textContent = editing ? `编辑${editNames[type] || '项目'}` : config.title; $('#modal-label').textContent = editing ? `EDIT ${type === 'film-rolls' ? 'FILM ROLL' : type === 'film-exposures' ? 'EXPOSURE' : type === 'writings' ? 'WRITING' : 'EXCERPT'}` : config.label; $('#form-fields').innerHTML = typeof config.fields === 'function' ? config.fields(item || {}) : config.fields;
+  const editNames = { excerpts:'摘录', writings:'内容', 'film-rolls':'胶卷', 'film-exposures':'曝光记录', 'todo-labels':'待办标签' };
+  $('#modal-title').textContent = editing ? `编辑${editNames[type] || '项目'}` : config.title; $('#modal-label').textContent = editing ? `EDIT ${type === 'film-rolls' ? 'FILM ROLL' : type === 'film-exposures' ? 'EXPOSURE' : type === 'writings' ? 'WRITING' : type === 'todo-labels' ? 'LABEL' : 'EXCERPT'}` : config.label; $('#form-fields').innerHTML = typeof config.fields === 'function' ? config.fields(item || {}) : config.fields;
   $('#item-form').dataset.type = type; $('#item-form').dataset.id = item?.id || ''; $('#item-form').dataset.rollId = rollId; $('#modal').hidden = false; $('#quick-menu').hidden = true;
   setTimeout(() => $('#item-form input')?.focus(), 50);
 }
@@ -1307,6 +1318,19 @@ document.addEventListener('click', async (event) => {
     openModal(edit.dataset.edit, item);
     return;
   }
+  const todoFilter = event.target.closest('[data-todo-filter]');
+  if (todoFilter) { state.todoFilter = todoFilter.dataset.todoFilter; render(); return; }
+  if (event.target.closest('[data-todo-manage]')) { state.todoLabelManaging = !state.todoLabelManaging; render(); return; }
+  const editTodoLabel = event.target.closest('[data-edit-todo-label]');
+  if (editTodoLabel) { const label = state.todoLabels.find((item) => item.id === editTodoLabel.dataset.editTodoLabel); if (label) openModal('todo-labels', label); return; }
+  const deleteTodoLabel = event.target.closest('[data-delete-todo-label]');
+  if (deleteTodoLabel) {
+    const label = state.todoLabels.find((item) => item.id === deleteTodoLabel.dataset.deleteTodoLabel);
+    if (!label || !confirm(`删除「${label.name}」？其中的待办会保留并转入“未分类”。`)) return;
+    const deleted = await mutate(() => request(`/api/todo-labels/${label.id}`, { method:'DELETE' }), '标签已删除，待办已转入未分类');
+    if (deleted && state.todoFilter === label.id) { state.todoFilter = 'unclassified'; render(); }
+    return;
+  }
   const category = event.target.closest('[data-category]'); if (category) { state.category=category.dataset.category; render(); }
   if (event.target.closest('[data-folder-manage]')) { state.folderManaging = !state.folderManaging; render(); }
   const toggle = event.target.closest('[data-toggle]');
@@ -1462,10 +1486,11 @@ $('#item-form').addEventListener('submit', async (event) => {
   }
   if (type === 'excerpts') payload.anonymous = Boolean(form.elements.anonymous.checked);
   if (type === 'writings') payload.anonymous = form.elements.anonymous.value === 'true';
+  if (type === 'todos') payload.labelId = payload.labelId || null;
   if (payload.duration) payload.duration=Number(payload.duration);
   if (payload.targetCount) payload.targetCount=Number(payload.targetCount);
   const editing = Boolean(itemId);
-  await mutate(()=>request(`/api/${type}${editing ? `/${itemId}` : ''}`,{method:editing ? 'PATCH' : 'POST',body:JSON.stringify(payload)}), editing ? '已更新' : '已添加'); closeModal();
+  if (await mutate(()=>request(`/api/${type}${editing ? `/${itemId}` : ''}`,{method:editing ? 'PATCH' : 'POST',body:JSON.stringify(payload)}), editing ? '已更新' : '已添加')) closeModal();
 });
 $('#library-book-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -1566,6 +1591,8 @@ document.addEventListener('input', (event) => {
   if (metadataInput && state.library.bookMode === 'upload') metadataInput.dataset.manualValue = 'true';
 });
 document.addEventListener('change', async (event) => {
+  const todoPicker = event.target.closest('[data-move-todo]');
+  if (todoPicker) { await mutate(() => request(`/api/todos/${todoPicker.dataset.moveTodo}`, { method:'PATCH', body:JSON.stringify({ labelId:todoPicker.value || null }) }), '待办标签已更新'); return; }
   const libraryFile = event.target.closest('#library-book-form [name="bookFile"]');
   if (libraryFile) {
     const file = libraryFile.files?.[0];
@@ -1668,7 +1695,7 @@ $('#hermes-chat-form button').addEventListener('click', (event) => {
 });
 document.addEventListener('keydown', (e) => { if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();$('#global-search').focus()} if(e.key==='Escape'){closeModal();closeAuthCaptcha();closeLibraryModals();} });
 window.addEventListener('hashchange',()=> state.user ? showPage(location.hash.slice(1)||'dashboard') : showAuth('login'));
-async function mutate(action,message){try{await action();await load();toast(message)}catch(e){toast(e.message)}}
+async function mutate(action,message){try{await action();await load();toast(message);return true}catch(e){toast(e.message);return false}}
 async function saveFolderOrder(draggedId, targetId) {
   if (!draggedId || !targetId || draggedId === targetId) return;
   const folders = orderedFolders();

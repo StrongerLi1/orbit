@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import websockets
+from pymysql.err import IntegrityError
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -82,6 +83,7 @@ from .repository import (
     create_film_exposure,
     create_film_roll,
     create_item,
+    create_todo_label,
     create_writing_post,
     delete_book,
     delete_book_review,
@@ -89,6 +91,7 @@ from .repository import (
     delete_film_exposure,
     delete_film_roll,
     delete_item,
+    delete_todo_label,
     delete_writing_post,
     folder_exists,
     folder_has_bookmarks,
@@ -100,6 +103,7 @@ from .repository import (
     get_book_by_share_token,
     get_book_storage,
     get_item,
+    get_todo_label,
     get_film_exposure_for_owner,
     get_film_roll_for_owner,
     get_writing_post_for_owner,
@@ -110,6 +114,7 @@ from .repository import (
     list_book_reads,
     list_books,
     list_items,
+    list_todo_labels,
     list_film_rolls,
     list_writing_posts,
     ensure_book_share,
@@ -124,6 +129,7 @@ from .repository import (
     update_film_exposure,
     update_film_roll,
     update_item,
+    update_todo_label,
     update_writing_post,
 )
 
@@ -220,11 +226,15 @@ def validate(collection: str, input_data: dict[str, Any]) -> dict[str, Any]:
 
     if collection == "todos":
         priority = item.get("priority") if item.get("priority") in {"low", "medium", "high"} else "medium"
+        label_id = item.get("labelId")
+        if label_id is not None and (not isinstance(label_id, str) or not label_id.strip()):
+            raise HTTPException(status_code=422, detail="待办标签不存在或不可用")
         return {
             "title": title,
             "priority": priority,
             "dueDate": str(item.get("dueDate") or ""),
             "completed": bool(item.get("completed")),
+            "labelId": label_id,
         }
 
     if collection == "plans":
@@ -796,7 +806,7 @@ def hermes_agent_stop(request: Request):
 @app.api_route("/hermes-dashboard", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
 @app.api_route("/hermes-dashboard/{proxy_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
 async def hermes_dashboard_proxy(request: Request, proxy_path: str = ""):
-    require_permission(request, "agents:manage")
+    require_permission(request, "agents:manage", allow_refresh=True)
     if not _hermes_status().get("running"):
         raise HTTPException(status_code=503, detail="Hermes dashboard 尚未运行，请先在管理员页面启动")
 
@@ -844,7 +854,7 @@ async def hermes_dashboard_proxy(request: Request, proxy_path: str = ""):
 @app.websocket("/hermes-dashboard/ws")
 async def hermes_dashboard_ws_proxy(websocket: WebSocket):
     try:
-        require_permission(websocket, "agents:manage")  # type: ignore[arg-type]
+        require_permission(websocket, "agents:manage", allow_refresh=True)  # type: ignore[arg-type]
     except HTTPException:
         await websocket.close(code=1008)
         return
@@ -904,7 +914,7 @@ async def hermes_dashboard_ws_proxy(websocket: WebSocket):
 
 async def _proxy_hermes_websocket(websocket: WebSocket, upstream_path: str) -> None:
     try:
-        require_permission(websocket, "agents:manage")  # type: ignore[arg-type]
+        require_permission(websocket, "agents:manage", allow_refresh=True)  # type: ignore[arg-type]
     except HTTPException:
         await websocket.close(code=1008)
         return
@@ -1840,6 +1850,62 @@ def writing_delete(post_id: str, request: Request):
     return {"ok": True}
 
 
+def _todo_label_name(data: dict[str, Any]) -> str:
+    value = data.get("name")
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="标签名称需要 1–30 个字符")
+    name = value.strip()
+    if not 1 <= len(name) <= 30:
+        raise HTTPException(status_code=422, detail="标签名称需要 1–30 个字符")
+    return name
+
+
+def _check_todo_label(label_id: str | None, owner_id: str) -> None:
+    if label_id is not None and not get_todo_label(label_id, owner_id):
+        raise HTTPException(status_code=422, detail="待办标签不存在或不可用")
+
+
+@app.get("/api/todo-labels")
+def todo_label_list(request: Request):
+    user = require_permission(request, "content:read")
+    return list_todo_labels(user["id"])
+
+
+@app.post("/api/todo-labels", status_code=201)
+async def todo_label_create(request: Request):
+    user = require_permission(request, "content:write")
+    name = _todo_label_name(await request.json())
+    try:
+        return create_todo_label(name, user["id"])
+    except IntegrityError as error:
+        if error.args and error.args[0] == 1062:
+            raise HTTPException(status_code=409, detail="这个待办标签已经存在") from error
+        raise
+
+
+@app.patch("/api/todo-labels/{label_id}")
+async def todo_label_update(label_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    if not get_todo_label(label_id, user["id"]):
+        raise HTTPException(status_code=404, detail="待办标签不存在")
+    name = _todo_label_name(await request.json())
+    try:
+        update_todo_label(label_id, name, user["id"])
+    except IntegrityError as error:
+        if error.args and error.args[0] == 1062:
+            raise HTTPException(status_code=409, detail="这个待办标签已经存在") from error
+        raise
+    return get_todo_label(label_id, user["id"])
+
+
+@app.delete("/api/todo-labels/{label_id}")
+def todo_label_delete(label_id: str, request: Request):
+    user = require_permission(request, "content:write")
+    if not delete_todo_label(label_id, user["id"]):
+        raise HTTPException(status_code=404, detail="待办标签不存在")
+    return {"ok": True}
+
+
 @app.get("/api/{collection}")
 def api_list(collection: str, request: Request):
     user = require_permission(request, "content:read")
@@ -1856,6 +1922,14 @@ async def api_create(collection: str, request: Request):
     valid = validate(collection, await request.json())
     if collection == "folders" and folder_exists(valid["name"]):
         raise HTTPException(status_code=409, detail="这个收藏夹已经存在")
+    if collection == "todos":
+        _check_todo_label(valid["labelId"], user["id"])
+        try:
+            return create_item(collection, valid, user)
+        except IntegrityError as error:
+            if error.args and error.args[0] == 1452:
+                raise HTTPException(status_code=422, detail="待办标签不存在或不可用") from error
+            raise
     return create_item(collection, valid, user)
 
 
@@ -1873,6 +1947,14 @@ async def api_update(collection: str, item_id: str, request: Request):
     if collection == "folders" and "sortOrder" in data:
         require_permission(request, "folders:manage")
     valid = validate(collection, {**existing, **data})
+    if collection == "todos":
+        _check_todo_label(valid["labelId"], user["id"])
+        try:
+            return update_item(collection, item_id, valid, user)
+        except IntegrityError as error:
+            if error.args and error.args[0] == 1452:
+                raise HTTPException(status_code=422, detail="待办标签不存在或不可用") from error
+            raise
     return update_item(collection, item_id, valid, user)
 
 

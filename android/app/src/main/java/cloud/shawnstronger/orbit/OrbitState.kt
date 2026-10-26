@@ -29,6 +29,7 @@ class OrbitState(val client: OrbitClient) {
     var bookmarkSearch by mutableStateOf("")
     var folders by mutableStateOf(emptyList<Folder>())
     var todos by mutableStateOf(emptyList<Todo>())
+    var todoLabels by mutableStateOf(emptyList<TodoLabel>())
     var plans by mutableStateOf(emptyList<Plan>())
     var excerpts by mutableStateOf(emptyList<Excerpt>())
     var writings by mutableStateOf(emptyList<WritingPost>())
@@ -364,10 +365,14 @@ class OrbitState(val client: OrbitClient) {
         }
     }
 
-
-    suspend fun addTodo(title: String, priority: String, dueDate: String) = mutate {
-        client.create("todos", JSONObject().put("title", title).put("priority", priority).put("dueDate", dueDate))
+    suspend fun addTodo(title: String, priority: String, dueDate: String, labelId: String?) = mutate {
+        client.create("todos", JSONObject().put("title", title).put("priority", priority).put("dueDate", dueDate).put("labelId", labelId ?: JSONObject.NULL))
     }
+
+    suspend fun addTodoLabel(name: String) = mutate { client.create("todo-labels", JSONObject().put("name", name)) }
+    suspend fun renameTodoLabel(label: TodoLabel, name: String) = mutate { client.patch("todo-labels", label.id, JSONObject().put("name", name)) }
+    suspend fun deleteTodoLabel(label: TodoLabel) = mutate { client.delete("todo-labels", label.id) }
+    suspend fun moveTodo(item: Todo, labelId: String?) = mutate { client.patch("todos", item.id, JSONObject().put("labelId", labelId ?: JSONObject.NULL)) }
 
     suspend fun toggleTodo(item: Todo) = mutate {
         client.patch("todos", item.id, JSONObject().put("completed", !item.completed))
@@ -586,10 +591,7 @@ class OrbitState(val client: OrbitClient) {
         }
     }
 
-    private suspend fun mutate(block: suspend () -> Unit): Boolean = guarded {
-        block()
-        loadContentOrThrow()
-    }
+    private suspend fun mutate(block: suspend () -> Unit): Boolean = libraryMutation(block) { loadContentOrThrow() }
 
     private suspend fun libraryMutation(
         mutate: suspend () -> Unit,
@@ -625,6 +627,7 @@ class OrbitState(val client: OrbitClient) {
             listOf(
                 "收藏" to suspend { bookmarks = client.bookmarks() },
                 "待办" to suspend { todos = client.todos() },
+                "待办标签" to suspend { todoLabels = client.todoLabels() },
                 "计划" to suspend { plans = client.plans() },
                 "收藏夹" to suspend {
                     folders = client.folders().sortedWith(compareBy<Folder> { it.sortOrder }.thenByDescending { it.createdAt })
@@ -664,6 +667,7 @@ class OrbitState(val client: OrbitClient) {
         bookmarkSearch = ""
         folders = emptyList()
         todos = emptyList()
+        todoLabels = emptyList()
         plans = emptyList()
         excerpts = emptyList()
         writings = emptyList()

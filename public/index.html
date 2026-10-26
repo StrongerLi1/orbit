@@ -5,10 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="theme-color" content="#f7f6f2">
   <title>Orbit · 个人工作台</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=orbit-1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=20261015-kindle-email">
+  <link rel="stylesheet" href="/styles.css?v=20261023-sidebar">
   <link rel="stylesheet" href="/writings.css?v=20260719-writing-posts">
 </head>
 <body>
@@ -182,6 +183,7 @@
 
         <section class="page" id="todos">
           <div class="page-title"><div><p class="eyebrow">GET THINGS DONE</p><h1>待办事项</h1><p>一次做好一件事，其他的先交给这里。</p></div><button class="primary" data-add="todos">＋ 添加待办</button></div>
+          <div class="filters todo-label-toolbar"><button class="filter active" data-todo-filter="all">全部</button><div id="todo-label-filters"></div><button class="filter" data-todo-filter="unclassified">未分类</button><button class="new-folder" data-add="todo-labels">＋ 新建标签</button><button class="tag-manage" id="todo-label-manage" data-todo-manage>管理标签</button></div>
           <div class="todo-board"><div class="card"><div class="card-head"><h2>进行中</h2><span id="active-count" class="count"></span></div><div id="todos-active" class="todo-list large"></div></div><div class="card"><div class="card-head"><h2>已完成</h2><button class="text-btn" id="clear-completed">清空</button></div><div id="todos-completed" class="todo-list large"></div></div></div>
         </section>
 
@@ -303,6 +305,6 @@
   <div id="toast" class="toast"></div>
   <link rel="stylesheet" href="/playcaptcha/clawcaptcha.css?v=20260704-playcaptcha">
   <script src="/playcaptcha/playcaptcha-island.js?v=20260704-playcaptcha"></script>
-  <script src="/app.js?v=20261015-kindle-email"></script>
+  <script src="/app.js?v=20261023-todo-labels"></script>
 </body>
 </html>

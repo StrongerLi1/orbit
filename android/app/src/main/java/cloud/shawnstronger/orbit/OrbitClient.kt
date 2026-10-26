@@ -51,6 +51,7 @@ class OrbitClient(context: Context) {
 
     suspend fun bookmarks() = OrbitJson.bookmarks(request("GET", "/api/bookmarks"))
     suspend fun todos() = OrbitJson.todos(request("GET", "/api/todos"))
+    suspend fun todoLabels() = OrbitJson.todoLabels(request("GET", "/api/todo-labels"))
     suspend fun plans() = OrbitJson.plans(request("GET", "/api/plans"))
     suspend fun folders() = OrbitJson.folders(request("GET", "/api/folders"))
     suspend fun excerpts() = OrbitJson.excerpts(request("GET", "/api/excerpts"))

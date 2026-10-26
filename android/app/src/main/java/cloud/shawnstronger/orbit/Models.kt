@@ -25,6 +25,7 @@ data class OrbitUser(
 }
 
 data class Folder(val id: String, val name: String, val sortOrder: Int, val createdAt: String)
+data class TodoLabel(val id: String, val name: String, val createdAt: String)
 data class Bookmark(
     val id: String,
     val title: String,
@@ -41,6 +42,7 @@ data class Todo(
     val dueDate: String,
     val completed: Boolean,
     val createdAt: String,
+    val labelId: String? = null,
 )
 data class Plan(
     val id: String,
@@ -221,9 +223,10 @@ object OrbitJson {
     )
 
     fun todos(raw: String) = JSONArray(raw).objects(::todo)
+    fun todoLabels(raw: String) = JSONArray(raw).objects { obj -> TodoLabel(obj.text("id"), obj.text("name"), obj.text("createdAt")) }
     fun todo(obj: JSONObject) = Todo(
         obj.text("id"), obj.text("title"), obj.text("priority"), obj.text("dueDate"),
-        obj.optBoolean("completed"), obj.text("createdAt"),
+        obj.optBoolean("completed"), obj.text("createdAt"), obj.optString("labelId").takeIf { !obj.isNull("labelId") && it.isNotBlank() },
     )
 
     fun plans(raw: String) = JSONArray(raw).objects(::plan)

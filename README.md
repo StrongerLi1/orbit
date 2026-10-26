@@ -88,6 +88,7 @@ node scripts/import-bookmarks.js /path/to/bookmarks.html
 - `GET/POST /api/bookmarks`，`PATCH/DELETE /api/bookmarks/:id`
 - `GET/POST /api/plans`，`PATCH/DELETE /api/plans/:id`
 - `GET/POST /api/todos`，`PATCH/DELETE /api/todos/:id`
+- `GET/POST /api/todo-labels`，`PATCH/DELETE /api/todo-labels/:id`；待办通过可空的 `labelId` 关联个人标签，删除标签后待办保留在“未分类”
 - `GET/POST /api/folders`，`PATCH/DELETE /api/folders/:id`
 - `GET/POST /api/excerpts`，`PATCH/DELETE /api/excerpts/:id`
 - `GET/POST /api/writings`，`PATCH/DELETE /api/writings/:id`，Web 写作内容；返回公开内容和当前用户自己的私密内容

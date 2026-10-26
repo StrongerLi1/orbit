@@ -233,6 +233,7 @@ def delete_user_account(user_id: str) -> dict[str, bool]:
             cursor.execute("DELETE FROM book_reads WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM book_reviews WHERE user_id = %s", (user_id,))
             cursor.execute("DELETE FROM todos WHERE owner_user_id = %s", (user_id,))
+            cursor.execute("DELETE FROM todo_labels WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM plans WHERE owner_user_id = %s", (user_id,))
             cursor.execute("DELETE FROM writing_posts WHERE owner_user_id = %s", (user_id,))
             cursor.execute(
@@ -425,8 +426,15 @@ def revoke_refresh_token(token: str) -> None:
         return
 
 
-def require_user(request: Request) -> dict[str, Any]:
-    payload = _jwt_decode(request.cookies.get(ACCESS_COOKIE, ""), "access")
+def require_user(request: Request, allow_refresh: bool = False) -> dict[str, Any]:
+    try:
+        payload = _jwt_decode(request.cookies.get(ACCESS_COOKIE, ""), "access")
+    except HTTPException:
+        if not allow_refresh:
+            raise
+        payload = _jwt_decode(request.cookies.get(REFRESH_COOKIE, ""), "refresh")
+        if _redis().get(_refresh_key(str(payload.get("jti", "")))) != str(payload.get("sub", "")):
+            raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
     user = get_user_by_id(str(payload.get("sub", "")))
     if not user:
         raise HTTPException(status_code=401, detail="登录状态已失效，请重新登录")
@@ -434,8 +442,8 @@ def require_user(request: Request) -> dict[str, Any]:
     return attach_user_access(user)
 
 
-def require_permission(request: Request, permission: str) -> dict[str, Any]:
-    user = require_user(request)
+def require_permission(request: Request, permission: str, allow_refresh: bool = False) -> dict[str, Any]:
+    user = require_user(request, allow_refresh=allow_refresh)
     if permission not in user["permissions"]:
         raise HTTPException(status_code=403, detail="没有权限执行此操作")
     return user

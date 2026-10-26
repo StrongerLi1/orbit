@@ -129,6 +129,45 @@ def initialize_database() -> None:
             )
             cursor.execute(
                 """
+                CREATE TABLE IF NOT EXISTS todo_labels (
+                    id VARCHAR(64) PRIMARY KEY,
+                    owner_user_id VARCHAR(64) NOT NULL,
+                    name VARCHAR(120) NOT NULL,
+                    created_at VARCHAR(40) NOT NULL,
+                    UNIQUE KEY uq_todo_labels_owner_name (owner_user_id, name),
+                    INDEX idx_todo_labels_owner_created (owner_user_id, created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'todos' AND COLUMN_NAME = 'label_id'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE todos ADD COLUMN label_id VARCHAR(64) NULL DEFAULT NULL AFTER owner_user_id")
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'todos' AND INDEX_NAME = 'idx_todos_label'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE todos ADD INDEX idx_todos_label (label_id)")
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS count FROM information_schema.TABLE_CONSTRAINTS
+                WHERE CONSTRAINT_SCHEMA = %s AND TABLE_NAME = 'todos' AND CONSTRAINT_NAME = 'fk_todos_label'
+                """,
+                (settings.mysql_database,),
+            )
+            if cursor.fetchone()["count"] == 0:
+                cursor.execute("ALTER TABLE todos ADD CONSTRAINT fk_todos_label FOREIGN KEY (label_id) REFERENCES todo_labels(id) ON DELETE SET NULL")
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS plans (
                     id VARCHAR(64) PRIMARY KEY,
                     owner_user_id VARCHAR(64) NULL DEFAULT NULL,

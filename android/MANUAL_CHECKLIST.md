@@ -25,6 +25,7 @@ Run this checklist against a disposable account on both API 26 and the current t
 - [ ] Excerpt create/list/shuffle/delete preserves author, source, date, and note.
 - [ ] Daily/weekly/monthly plans create/delete, date navigation, increment/decrement, period progress, seven-day totals, and history statistics round-trip.
 - [ ] Todo create with priority/due date, complete/reopen, delete, and clear-completed round-trip.
+- [ ] Todo labels: create/rename/delete, filter and create within a label, move an existing todo, and verify deletion keeps todos under “未分类” across Web and Android.
 - [ ] Netdisk search shows source filters and opens a result in the system browser.
 
 ## Writings and film diary

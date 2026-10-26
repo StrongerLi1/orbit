@@ -411,10 +411,34 @@ private fun planColorName(value: String) = when (value) { "orange" -> "琥珀"; 
 @Composable
 fun TodosScreen(state: OrbitState) {
     var add by remember { mutableStateOf(false) }
+    var filter by remember { mutableStateOf("all") }
+    var addLabel by remember { mutableStateOf(false) }
+    var manageLabels by remember { mutableStateOf(false) }
+    var renameLabel by remember { mutableStateOf<TodoLabel?>(null) }
+    var deleteLabel by remember { mutableStateOf<TodoLabel?>(null) }
+    var moveTodo by remember { mutableStateOf<Todo?>(null) }
     val scope = rememberCoroutineScope()
-    val sorted = state.todos.sortedWith(compareBy<Todo> { it.completed }.thenByDescending { priorityRank(it.priority) }.thenBy { it.dueDate })
+    val activeFilter = filter.takeIf { it == "all" || it == "unclassified" || state.todoLabels.any { label -> label.id == it } } ?: "unclassified"
+    val sorted = state.todos.filter { activeFilter == "all" || (activeFilter == "unclassified" && it.labelId == null) || it.labelId == activeFilter }
+        .sortedWith(compareBy<Todo> { it.completed }.thenByDescending { priorityRank(it.priority) }.thenBy { it.dueDate })
     Page {
-        SectionTitle("待办事项", "${state.todos.count { !it.completed }} 项未完成") { Button(onClick = { add = true }) { Text("添加") } }
+        SectionTitle("待办事项", "${sorted.count { !it.completed }} 项未完成") { Button(onClick = { add = true }) { Text("添加") } }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { FilterChip(activeFilter == "all", { filter = "all" }, { Text("全部") }) }
+            items(state.todoLabels) { label -> FilterChip(activeFilter == label.id, { filter = label.id }, { Text(label.name) }) }
+            item { FilterChip(activeFilter == "unclassified", { filter = "unclassified" }, { Text("未分类") }) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { addLabel = true }) { Text("新建标签") }
+            TextButton(onClick = { manageLabels = !manageLabels }) { Text(if (manageLabels) "完成管理" else "管理标签") }
+        }
+        if (manageLabels) state.todoLabels.forEach { label ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(label.name, Modifier.weight(1f))
+                TextButton(onClick = { renameLabel = label }) { Text("重命名") }
+                TextButton(onClick = { deleteLabel = label }) { Text("删除") }
+            }
+        }
         if (state.todos.any { it.completed }) TextButton(onClick = { scope.launch { state.clearCompleted() } }) { Text("清除所有已完成") }
         if (sorted.isEmpty()) EmptyState("没有待办，轻松一下") else sorted.forEachIndexed { index, item ->
             if (index == 0 || sorted[index - 1].completed != item.completed) {
@@ -425,8 +449,9 @@ fun TodosScreen(state: OrbitState) {
                     Checkbox(item.completed, { scope.launch { state.toggleTodo(item) } })
                     Column(Modifier.weight(1f)) {
                         Text(item.title, style = MaterialTheme.typography.titleSmall, color = if (item.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-                        Text("${priorityName(item.priority)}${item.dueDate.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${priorityName(item.priority)}${item.dueDate.takeIf(String::isNotBlank)?.let { " · $it" }.orEmpty()} · ${state.todoLabels.find { it.id == item.labelId }?.name ?: "未分类"}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    TextButton(onClick = { moveTodo = item }) { Text("移动") }
                     IconButton(onClick = { scope.launch { state.deleteContent("todos", item.id) } }) {
                         Icon(Icons.Outlined.DeleteOutline, contentDescription = "删除待办")
                     }
@@ -434,7 +459,24 @@ fun TodosScreen(state: OrbitState) {
             }
         }
     }
-    if (add) TodoDialog({ add = false }) { title, priority, due -> scope.launch { if (state.addTodo(title, priority, due)) add = false } }
+    if (add) TodoDialog(state.todoLabels, activeFilter.takeUnless { it == "all" || it == "unclassified" }, { add = false }) { title, priority, due, labelId -> scope.launch { if (state.addTodo(title, priority, due, labelId)) add = false } }
+    if (addLabel) OneFieldDialog("新建待办标签", "名称", { addLabel = false }) { name -> scope.launch { if (state.addTodoLabel(name)) addLabel = false } }
+    renameLabel?.let { label -> OneFieldDialog("重命名「${label.name}」", "新名称", { renameLabel = null }) { name -> scope.launch { if (state.renameTodoLabel(label, name)) renameLabel = null } } }
+    deleteLabel?.let { label -> ConfirmDialog("删除待办标签", "删除「${label.name}」后，待办会保留并转入“未分类”。", { deleteLabel = null }) {
+        scope.launch { if (state.deleteTodoLabel(label)) { if (filter == label.id) filter = "unclassified"; deleteLabel = null } }
+    } }
+    moveTodo?.let { item -> AlertDialog(
+        onDismissRequest = { moveTodo = null },
+        confirmButton = { TextButton(onClick = { moveTodo = null }) { Text("取消") } },
+        title = { Text("移动待办") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+            (listOf<TodoLabel?>(null) + state.todoLabels).forEach { label ->
+                TextButton(onClick = { scope.launch { if (state.moveTodo(item, label?.id)) moveTodo = null } }, modifier = Modifier.fillMaxWidth()) {
+                    Text((if (item.labelId == label?.id) "✓ " else "") + (label?.name ?: "未分类"))
+                }
+            }
+        } },
+    ) }
 }
 
 private fun priorityRank(value: String) = when (value) { "high" -> 3; "medium" -> 2; else -> 1 }
@@ -736,10 +778,15 @@ private fun ExcerptDialog(item: Excerpt?, onDismiss: () -> Unit, onSubmit: (Stri
 }
 
 @Composable
-private fun TodoDialog(onDismiss: () -> Unit, onSubmit: (String, String, String) -> Unit) {
-    var title by remember { mutableStateOf("") }; var priority by remember { mutableStateOf("medium") }; var due by remember { mutableStateOf("") }
-    FormDialog("添加待办", onDismiss, title.isNotBlank(), { onSubmit(title, priority, due) }) {
+private fun TodoDialog(labels: List<TodoLabel>, initialLabelId: String?, onDismiss: () -> Unit, onSubmit: (String, String, String, String?) -> Unit) {
+    var title by remember { mutableStateOf("") }; var priority by remember { mutableStateOf("medium") }; var due by remember { mutableStateOf("") }; var labelId by remember(initialLabelId) { mutableStateOf(initialLabelId) }
+    FormDialog("添加待办", onDismiss, title.isNotBlank(), { onSubmit(title, priority, due, labelId) }) {
         OutlinedTextField(title, { title = it }, label = { Text("待办标题") }, modifier = Modifier.fillMaxWidth())
+        Text("标签")
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            item { FilterChip(labelId == null, { labelId = null }, { Text("未分类") }) }
+            items(labels) { label -> FilterChip(labelId == label.id, { labelId = label.id }, { Text(label.name) }) }
+        }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { items(listOf("low", "medium", "high")) { value -> FilterChip(priority == value, { priority = value }, { Text(priorityName(value)) }) } }
         DatePickerField("截止日期", due, allowEmpty = true) { due = it }
     }
